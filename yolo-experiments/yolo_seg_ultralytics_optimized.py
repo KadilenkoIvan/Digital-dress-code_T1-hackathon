@@ -33,7 +33,7 @@ def main():
     
     # Определяем устройство
     if args.device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'cpu' if torch.cuda.is_available() else 'cpu'
     else:
         device = args.device
     
@@ -105,13 +105,14 @@ def main():
     print("✅ Готово к работе\n")
     
     while True:
-        start_time = time.time()
+        
         
         ret, frame = cap.read()
         if not ret:
             print("❌ Ошибка чтения кадра")
             break
         
+        start_time = time.time()
         # Inference с оптимизациями
         results = model(
             frame, 
@@ -124,14 +125,31 @@ def main():
             agnostic_nms=True,  # Класс-агностик NMS (быстрее)
             max_det=100  # Максимум детекций (меньше = быстрее)
         )
+
+        result = results[0]
+
+        mask_total = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        if result.masks is not None:
+            for box, mask, cls in zip(result.boxes.xyxy, result.masks.data, result.boxes.cls):
+                if int(cls) == 0:
+                    mask = mask.cpu().numpy()
+                    mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
+                    mask = (mask > 0.5).astype(np.uint8)
+                    mask_total = np.maximum(mask_total, mask)
         
-        # Отрисовка
-        annotated_frame = results[0].plot()
-        
-        # Время обработки
+            annotated_frame = cv2.bitwise_and(frame, frame, mask=mask_total)
+        else:
+            annotated_frame = results[0].plot()
+
         end_time = time.time()
         frame_time_ms = (end_time - start_time) * 1000
         frame_times.append(frame_time_ms)
+        # Отрисовка
+        #annotated_frame = results[0].plot()
+        
+        # Время обработки
+        
         if len(frame_times) > 30:
             frame_times.pop(0)
         avg_frame_time = sum(frame_times) / len(frame_times)
