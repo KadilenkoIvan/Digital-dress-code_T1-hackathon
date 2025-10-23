@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import os
+import time
 
 import torch
 import torch.nn as nn
@@ -39,8 +40,12 @@ cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
+frame_count = 0
+total_time = 0
+
 print('Start matting...')
 while(True):
+    start_time = time.time()
     _, frame_np = cap.read()
     frame_np = cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB)
     frame_np = cv2.resize(frame_np, (910, 512), cv2.INTER_AREA)
@@ -61,6 +66,20 @@ while(True):
     fg_np = matte_np * frame_np + (1 - matte_np) * np.full(frame_np.shape, 255.0)
     view_np = np.uint8(np.concatenate((frame_np, fg_np), axis=1))
     view_np = cv2.cvtColor(view_np, cv2.COLOR_RGB2BGR)
+
+    frame_time = time.time() - start_time
+    total_time += frame_time
+    frame_count += 1
+    fps = 1.0 / frame_time if frame_time > 0 else 0.0
+    avg_fps = frame_count / total_time if total_time > 0 else 0.0
+    frame_time *= 1000
+
+    cv2.putText(view_np, f"FPS: {fps:.2f}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    cv2.putText(view_np, f"Avg FPS: {avg_fps:.2f}", (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+    cv2.putText(view_np, f"Frame time: {frame_time:.2f} ms", (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
     cv2.imshow('MODNet - WebCam [Press \'Q\' To Exit]', view_np)
     if cv2.waitKey(1) & 0xFF == ord('q'):
