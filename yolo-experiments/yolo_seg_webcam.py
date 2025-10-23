@@ -40,8 +40,8 @@ def main():
     
     print("Запуск обнаружения. Нажмите 'q' для выхода")
     
-    # Для подсчета FPS
-    fps_counter = []
+    # Для подсчета времени обработки
+    frame_times = []
     
     while True:
         start_time = time.time()
@@ -59,22 +59,25 @@ def main():
         # Отрисовываем результаты на кадре
         annotated_frame = results[0].plot()
         
-        # Подсчет FPS
+        # Время обработки кадра
         end_time = time.time()
-        fps = 1 / (end_time - start_time)
-        fps_counter.append(fps)
-        if len(fps_counter) > 30:
-            fps_counter.pop(0)
-        avg_fps = sum(fps_counter) / len(fps_counter)
+        frame_time_ms = (end_time - start_time) * 1000
+        frame_times.append(frame_time_ms)
+        if len(frame_times) > 30:
+            frame_times.pop(0)
+        avg_frame_time = sum(frame_times) / len(frame_times)
+        avg_fps = 1000 / avg_frame_time if avg_frame_time > 0 else 0
         
-        # Отображаем FPS
-        cv2.putText(annotated_frame, f"FPS: {avg_fps:.2f}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # Отображаем метрики
+        cv2.putText(annotated_frame, f"Time: {avg_frame_time:.1f}ms", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"FPS: {avg_fps:.1f}", (10, 65), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         
         # Отображаем количество обнаруженных объектов
         num_objects = len(results[0].boxes) if results[0].boxes is not None else 0
-        cv2.putText(annotated_frame, f"Objects: {num_objects}", (10, 70), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(annotated_frame, f"Objects: {num_objects}", (10, 100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         
         # Показываем результат
         cv2.imshow('YOLO Segmentation', annotated_frame)
@@ -87,7 +90,8 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     
-    print(f"Средний FPS: {avg_fps:.2f}")
+    print(f"\nСреднее время обработки: {avg_frame_time:.1f}ms")
+    print(f"Средний FPS: {avg_fps:.1f}")
 
 
 if __name__ == "__main__":

@@ -102,8 +102,8 @@ def main():
     print("  '+' - увеличить порог уверенности")
     print("  '-' - уменьшить порог уверенности")
     
-    # Переменные для FPS и динамической уверенности
-    fps_counter = []
+    # Переменные для метрик и динамической уверенности
+    frame_times = []
     current_conf = args.conf
     screenshot_counter = 0
     
@@ -123,17 +123,22 @@ def main():
         # Отрисовываем результаты
         annotated_frame = results[0].plot()
         
-        # Подсчет FPS
+        # Время обработки кадра
         end_time = time.time()
-        fps = 1 / (end_time - start_time)
-        fps_counter.append(fps)
-        if len(fps_counter) > 30:
-            fps_counter.pop(0)
-        avg_fps = sum(fps_counter) / len(fps_counter)
+        frame_time_ms = (end_time - start_time) * 1000
+        frame_times.append(frame_time_ms)
+        if len(frame_times) > 30:
+            frame_times.pop(0)
+        avg_frame_time = sum(frame_times) / len(frame_times)
+        avg_fps = 1000 / avg_frame_time if avg_frame_time > 0 else 0
         
         # Информационная панель
         info_y = 30
-        cv2.putText(annotated_frame, f"FPS: {avg_fps:.2f}", (10, info_y), 
+        cv2.putText(annotated_frame, f"Time: {avg_frame_time:.1f}ms", (10, info_y), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        info_y += 35
+        cv2.putText(annotated_frame, f"FPS: {avg_fps:.1f}", (10, info_y), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         num_objects = len(results[0].boxes) if results[0].boxes is not None else 0
@@ -176,7 +181,8 @@ def main():
     cv2.destroyAllWindows()
     
     print(f"\nСтатистика:")
-    print(f"  Средний FPS: {avg_fps:.2f}")
+    print(f"  Среднее время обработки: {avg_frame_time:.1f}ms")
+    print(f"  Средний FPS: {avg_fps:.1f}")
     print(f"  Сделано скриншотов: {screenshot_counter}")
 
 

@@ -1,11 +1,13 @@
-# Основные библиотеки для YOLO11 сегментации
-ultralytics>=8.3.0  # YOLO11 требует версию 8.3.0+
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2+cu121
+torchvision==0.16.2+cu121
+torchaudio==2.1.2+cu121
+
+ultralytics>=8.3.0
 opencv-python>=4.8.0
 numpy>=1.24.0
-torch>=2.0.0
-torchvision>=0.15.0
-
-# Дополнительные библиотеки (опционально)
+onnx>=1.15.0
+#onnxruntime>=1.17.0  # Для CPU
+onnxruntime-gpu>=1.17.0  # Для ONNX на GPU (требует CUDA)
 pillow>=10.0.0
 matplotlib>=3.7.0
-

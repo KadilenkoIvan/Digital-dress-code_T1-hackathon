@@ -18,7 +18,11 @@ def main():
     
     print("Нажмите 'q' для выхода")
     
+    frame_times = []
+    
     while True:
+        start_time = time.time()
+        
         # Читаем кадр с камеры
         ret, frame = cap.read()
         
@@ -26,10 +30,19 @@ def main():
             print("Ошибка: Не удалось получить кадр")
             break
         
-        # Отображаем FPS
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # Время обработки кадра
+        end_time = time.time()
+        frame_time_ms = (end_time - start_time) * 1000
+        frame_times.append(frame_time_ms)
+        if len(frame_times) > 30:
+            frame_times.pop(0)
+        avg_frame_time = sum(frame_times) / len(frame_times)
+        
+        # Отображаем метрики
+        cv2.putText(frame, f"Frame time: {avg_frame_time:.1f}ms", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"FPS: {1000/avg_frame_time:.1f}", (10, 65), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         # Показываем кадр
         cv2.imshow('Webcam', frame)
