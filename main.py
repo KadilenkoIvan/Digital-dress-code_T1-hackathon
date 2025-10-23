@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import time
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu' if torch.cuda.is_available() else 'cpu'
 model = torch.hub.load('PeterL1n/RobustVideoMatting', 'mobilenetv3')
 model = model.to(device).eval()
 print(device)
@@ -11,8 +11,14 @@ print(device)
 rec = [None] * 4
 cap = cv2.VideoCapture(0)
 
+# Set webcam resolution
+WEBCAM_WIDTH = 640
+WEBCAM_HEIGHT = 320
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, WEBCAM_WIDTH)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WEBCAM_HEIGHT)
+
 green_color = (0, 255, 0)  # BGR
-background = np.full((480, 640, 3), green_color, dtype=np.uint8)
+background = np.full((WEBCAM_HEIGHT, WEBCAM_WIDTH, 3), green_color, dtype=np.uint8)
 
 frame_count = 0
 total_time = 0
@@ -27,6 +33,7 @@ while True:
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame_tensor = torch.from_numpy(frame_rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0
     frame_tensor = frame_tensor.to(device)
+    print(frame_tensor.shape)
 
     with torch.no_grad():
         fgr, pha, *rec = model(frame_tensor, *rec, downsample_ratio=0.25)
