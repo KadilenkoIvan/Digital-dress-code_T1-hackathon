@@ -1,1 +1,0 @@
-# Digital-dress-code_T1-hackathon
