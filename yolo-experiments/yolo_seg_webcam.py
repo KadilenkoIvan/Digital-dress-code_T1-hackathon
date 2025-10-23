@@ -1,6 +1,7 @@
 """
-YOLO Сегментация в реальном времени с веб-камеры
-Использует YOLOv8-seg для сегментации объектов
+YOLO11 Сегментация в реальном времени с веб-камеры
+Использует последнюю версию YOLO11-seg для сегментации объектов
+Автоматически выбирает GPU если доступен
 """
 import cv2
 import numpy as np
@@ -10,10 +11,10 @@ import torch
 
 
 def main():
-    # Загружаем модель YOLO-seg
-    # Доступные модели: yolov8n-seg.pt, yolov8s-seg.pt, yolov8m-seg.pt, yolov8l-seg.pt, yolov8x-seg.pt
+    # Загружаем модель YOLO11-seg (последняя версия)
+    # Доступные модели: yolo11n-seg.pt, yolo11s-seg.pt, yolo11m-seg.pt, yolo11l-seg.pt, yolo11x-seg.pt
     # n - nano (самая быстрая), s - small, m - medium, l - large, x - xlarge (самая точная)
-    model_path = "yolov8n-seg.pt"
+    model_path = "yolo11n-seg.pt"
     
     # Определяем устройство (автоматически выбирает GPU если доступен)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

@@ -1,6 +1,7 @@
 """
-Расширенная версия YOLO сегментации с дополнительными настройками
-Позволяет настраивать уверенность, IOU и отображение масок
+Расширенная версия YOLO11 сегментации с дополнительными настройками
+Использует последнюю версию YOLO11 для максимальной производительности
+Позволяет настраивать уверенность, IOU, устройство (GPU/CPU) и другие параметры
 """
 import cv2
 import numpy as np
@@ -11,9 +12,9 @@ import torch
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='YOLO Segmentation с веб-камеры')
-    parser.add_argument('--model', type=str, default='yolov8n-seg.pt',
-                        help='Путь к модели YOLO (по умолчанию: yolov8n-seg.pt)')
+    parser = argparse.ArgumentParser(description='YOLO11 Segmentation с веб-камеры')
+    parser.add_argument('--model', type=str, default='yolo11n-seg.pt',
+                        help='Путь к модели YOLO11 (по умолчанию: yolo11n-seg.pt)')
     parser.add_argument('--conf', type=float, default=0.25,
                         help='Порог уверенности (по умолчанию: 0.25)')
     parser.add_argument('--iou', type=float, default=0.7,
