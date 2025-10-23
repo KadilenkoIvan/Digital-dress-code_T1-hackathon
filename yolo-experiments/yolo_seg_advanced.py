@@ -7,6 +7,7 @@ import numpy as np
 from ultralytics import YOLO
 import time
 import argparse
+import torch
 
 
 def parse_args():
@@ -17,6 +18,8 @@ def parse_args():
                         help='Порог уверенности (по умолчанию: 0.25)')
     parser.add_argument('--iou', type=float, default=0.7,
                         help='Порог IOU для NMS (по умолчанию: 0.7)')
+    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cpu', 'cuda', 'gpu'],
+                        help='Устройство для вычислений: auto (авто), cpu, cuda/gpu (по умолчанию: auto)')
     parser.add_argument('--camera', type=int, default=0,
                         help='Индекс камеры (по умолчанию: 0)')
     parser.add_argument('--width', type=int, default=1280,
@@ -31,10 +34,28 @@ def parse_args():
 def main():
     args = parse_args()
     
+    # Определяем устройство
+    if args.device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    elif args.device in ['gpu', 'cuda']:
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            print("⚠️ CUDA недоступна, используется CPU")
+            device = 'cpu'
+    else:
+        device = 'cpu'
+    
     # Загружаем модель
     print(f"Загрузка модели {args.model}...")
+    print(f"Устройство: {device.upper()}")
+    if device == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA версия: {torch.version.cuda}")
+    
     try:
         model = YOLO(args.model)
+        model.to(device)
     except Exception as e:
         print(f"Ошибка загрузки модели: {e}")
         print("Убедитесь, что файл модели существует или будет загружен автоматически")
@@ -71,6 +92,7 @@ def main():
     
     print(f"\nНастройки:")
     print(f"  Модель: {args.model}")
+    print(f"  Устройство: {device.upper()}")
     print(f"  Уверенность: {args.conf}")
     print(f"  IOU: {args.iou}")
     print(f"\nУправление:")
@@ -95,7 +117,7 @@ def main():
             break
         
         # Выполняем сегментацию
-        results = model(frame, conf=current_conf, iou=args.iou, verbose=False)
+        results = model(frame, conf=current_conf, iou=args.iou, device=device, verbose=False)
         
         # Отрисовываем результаты
         annotated_frame = results[0].plot()

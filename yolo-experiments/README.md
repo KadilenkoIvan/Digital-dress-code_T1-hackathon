@@ -54,6 +54,8 @@ python yolo_seg_webcam.py
 
 Запускает YOLO сегментацию с моделью по умолчанию (`yolov8n-seg.pt`).
 
+**Автоматически выбирает GPU если доступен, иначе использует CPU.**
+
 Чтобы использовать другую модель, измените переменную `model_path` в файле.
 
 ### 3. YOLO сегментация (расширенная версия)
@@ -67,6 +69,11 @@ python yolo_seg_advanced.py
 ```bash
 # Использовать другую модель
 python yolo_seg_advanced.py --model yolov8s-seg.pt
+
+# Выбрать устройство (auto/cpu/cuda/gpu)
+python yolo_seg_advanced.py --device cuda  # Использовать GPU
+python yolo_seg_advanced.py --device cpu   # Использовать CPU
+python yolo_seg_advanced.py --device auto  # Автоматический выбор (по умолчанию)
 
 # Изменить порог уверенности
 python yolo_seg_advanced.py --conf 0.5
@@ -84,7 +91,7 @@ python yolo_seg_advanced.py --width 640 --height 480
 python yolo_seg_advanced.py --save
 
 # Комбинация параметров
-python yolo_seg_advanced.py --model yolov8m-seg.pt --conf 0.4 --save
+python yolo_seg_advanced.py --model yolov8m-seg.pt --device cuda --conf 0.4 --save
 ```
 
 **Управление во время работы:**
@@ -133,7 +140,19 @@ yolo-experiments/
 
 ### Ошибка импорта torch
 - Установите PyTorch с официального сайта: https://pytorch.org/
-- Для GPU установите версию с CUDA
+- Для GPU установите версию с CUDA:
+  ```bash
+  # Для Windows с CUDA
+  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+  
+  # Для CPU only
+  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+  ```
+
+### GPU не используется
+- Проверьте установлен ли CUDA: `nvidia-smi`
+- Проверьте доступность в PyTorch: `python -c "import torch; print(torch.cuda.is_available())"`
+- Явно укажите устройство: `--device cuda`
 
 ### Модель не загружается
 - Проверьте подключение к интернету (при первом запуске)

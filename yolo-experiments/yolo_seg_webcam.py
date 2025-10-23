@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import time
+import torch
 
 
 def main():
@@ -14,8 +15,16 @@ def main():
     # n - nano (самая быстрая), s - small, m - medium, l - large, x - xlarge (самая точная)
     model_path = "yolov8n-seg.pt"
     
+    # Определяем устройство (автоматически выбирает GPU если доступен)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
     print(f"Загрузка модели {model_path}...")
+    print(f"Устройство: {device.upper()}")
+    if device == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    
     model = YOLO(model_path)
+    model.to(device)
     
     # Открываем веб-камеру
     cap = cv2.VideoCapture(0)
@@ -44,7 +53,7 @@ def main():
             break
         
         # Выполняем сегментацию
-        results = model(frame, verbose=False)
+        results = model(frame, device=device, verbose=False)
         
         # Отрисовываем результаты на кадре
         annotated_frame = results[0].plot()
