@@ -4,6 +4,7 @@ import "./App.css";
 
 function App() {
   const [blocks, setBlocks] = useState([]);
+  const [selectedBlockId, setSelectedBlockId] = useState(null);
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
@@ -63,6 +64,23 @@ function App() {
     reader.readAsText(file);
   };
 
+  const handleAddTextBlock = () => {
+    const newId = `text_${Date.now()}`;
+    const newBlock = {
+      id: newId,
+      text: "Новый текст",
+      x: 50,
+      y: 300,
+      fontSize: 20,
+      color: "white",
+      fontFamily: "Arial",
+      fontWeight: "normal",
+      fontStyle: "normal"
+    };
+    setBlocks(prev => [...prev, newBlock]);
+    setSelectedBlockId(newId);
+  };
+
   return (
     <div className="app-container">
       <div className="stats-panel">
@@ -99,8 +117,8 @@ function App() {
         <WebcamWithText
           blocks={blocks}
           setBlocks={setBlocks}
-          selectedBlockId={null}
-          setSelectedBlockId={() => {}}
+          selectedBlockId={selectedBlockId}
+          setSelectedBlockId={setSelectedBlockId}
           onStatsUpdate={setStats}
           backgroundImage={blocks[0]?.image || null}
         />
@@ -132,6 +150,14 @@ function App() {
             Информация о сотруднике:
             <input type="file" accept=".json" onChange={handleJsonUpload} />
           </label>
+        </div>
+        <div className="setting-group">
+          <button 
+            className="add-text-btn"
+            onClick={handleAddTextBlock}
+          >
+            ➕ Добавить текст
+          </button>
         </div>
       </div>
     </div>

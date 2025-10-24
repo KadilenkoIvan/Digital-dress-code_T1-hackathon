@@ -1,6 +1,8 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useMemo } from "react";
 import * as ort from "onnxruntime-web";
 import DraggableText from "./DraggableText";
+import TextEditorPanel from "./TextEditorPanel";
+import "./TextEditorPanel.css";
 
 export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage }) {
   const videoRef = useRef(null);
@@ -17,6 +19,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const fullMaskCanvasRef = useRef(null); // Canvas для маски полного размера
   const backendNameRef = useRef('Loading...'); // Название используемого backend
   const prevMaskRef = useRef(null); // Предыдущая маска для temporal smoothing
+  const lastEmployeeRef = useRef(null); // Последний обработанный employee для предотвращения дублирования
+  const textClickedRef = useRef(false); // Флаг для отслеживания кликов по тексту
+  const backgroundLayerRef = useRef(null); // Ref для фонового слоя
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
@@ -333,7 +338,10 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             if (results.r3o) recRef.current[2] = results.r3o;
             if (results.r4o) recRef.current[3] = results.r4o;
 
-            // Рисуем оригинальное видео на основной canvas
+            // Очищаем canvas (делаем полностью прозрачным)
+            ctx.clearRect(0, 0, origWidth, origHeight);
+            
+            // Рисуем оригинальное видео на временный canvas
             ctx.drawImage(video, 0, 0, origWidth, origHeight);
             const originalImageData = ctx.getImageData(0, 0, origWidth, origHeight);
             
@@ -415,28 +423,24 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             fullMaskCtx.drawImage(maskCanvas, 0, 0, origWidth, origHeight);
             const fullMaskData = fullMaskCtx.getImageData(0, 0, origWidth, origHeight);
 
-            // Композитинг с фоном используя оригинальное видео и увеличенную маску
-            const background = backgroundRef.current;
+            // Композитинг: выводим только человека с прозрачным фоном
+            // Canvas будет прозрачным, чтобы через него было видно текст и фон
             const outputData = new Uint8ClampedArray(origWidth * origHeight * 4);
             
             for (let i = 0; i < origWidth * origHeight; i++) {
               const i4 = i * 4;
               const alpha = fullMaskData.data[i4] / 255.0;  // Берем альфа из увеличенной маски
-              const oneMinusAlpha = 1 - alpha;
               
               // Берем цвет из оригинального видео
               const r = originalImageData.data[i4];
               const g = originalImageData.data[i4 + 1];
               const b = originalImageData.data[i4 + 2];
               
-              const bgR = background ? background.data[i4] : 26;
-              const bgG = background ? background.data[i4 + 1] : 26;
-              const bgB = background ? background.data[i4 + 2] : 46;
-              
-              outputData[i4] = r * alpha + bgR * oneMinusAlpha;
-              outputData[i4 + 1] = g * alpha + bgG * oneMinusAlpha;
-              outputData[i4 + 2] = b * alpha + bgB * oneMinusAlpha;
-              outputData[i4 + 3] = 255;
+              // Выводим только человека, фон делаем прозрачным
+              outputData[i4] = r;
+              outputData[i4 + 1] = g;
+              outputData[i4 + 2] = b;
+              outputData[i4 + 3] = alpha * 255; // Альфа-канал: 255 для человека, 0 для фона
             }
 
             const outputImageData = new ImageData(outputData, origWidth, origHeight);
@@ -507,12 +511,33 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     };
   }, [session]);
 
-  useEffect(() => {
+  // Мемоизируем блок "b1" и его ключевые свойства для оптимизации
+  const bgBlockData = useMemo(() => {
     const bgBlock = blocks.find(b => b.id === "b1");
-    if (!bgBlock?.employee) return;
+    if (!bgBlock?.employee) return null;
+    return {
+      employee: bgBlock.employee,
+      level: bgBlock.level || bgBlock.employee.privacy_level || "low"
+    };
+  }, [blocks]);
 
-    const employee = bgBlock.employee;
-    const privacyLevel = bgBlock.level || employee.privacy_level || "low";
+  useEffect(() => {
+    if (!bgBlockData) {
+      lastEmployeeRef.current = null;
+      return;
+    }
+
+    const { employee, level: privacyLevel } = bgBlockData;
+    const bgBlock = blocks.find(b => b.id === "b1");
+
+    // Проверяем, не обрабатывали ли мы уже этого employee
+    const employeeKey = `${employee.full_name}_${employee.position}_${privacyLevel}`;
+    if (lastEmployeeRef.current === employeeKey) {
+      return;
+    }
+    
+    // Сохраняем текущего employee как последнего обработанного
+    lastEmployeeRef.current = employeeKey;
 
     const textBlocks = [];
 
@@ -573,13 +598,51 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     }
 
     setBlocks([bgBlock, ...textBlocks]);
-  }, [blocks[0]?.employee, blocks[0]?.level, backgroundRef.current]);
+  }, [bgBlockData, blocks, setBlocks]);
 
   const handleUpdate = (id, newProps) => {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...newProps } : b)));
   };
 
-  const handleBackgroundClick = () => setSelectedBlockId(null);
+  const handleDelete = (id) => {
+    setBlocks((prev) => {
+      const filtered = prev.filter((b) => b.id !== id);
+      // Если удаляется блок "b1", сбрасываем lastEmployeeRef
+      if (id === "b1") {
+        lastEmployeeRef.current = null;
+      }
+      return filtered;
+    });
+    setSelectedBlockId(null);
+  };
+
+  const handleEditorClose = (deleteId, shouldDelete) => {
+    if (shouldDelete && deleteId) {
+      handleDelete(deleteId);
+    }
+    setSelectedBlockId(null);
+  };
+
+  const handleTextSelect = (id) => {
+    textClickedRef.current = true;
+    setSelectedBlockId(id);
+    // Сбрасываем флаг через увеличенную задержку для надёжности
+    setTimeout(() => {
+      textClickedRef.current = false;
+    }, 50);
+  };
+
+  const handleBackgroundClick = (e) => {
+    // Не закрываем панель, если только что кликнули по тексту
+    if (textClickedRef.current) {
+      return;
+    }
+    
+    // Закрываем панель только при клике на фоновый слой или контейнер
+    if (e.target === containerRef.current || e.target === backgroundLayerRef.current) {
+      setSelectedBlockId(null);
+    }
+  };
 
   return (
     <div
@@ -599,21 +662,65 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         playsInline
         style={{ display: "none" }}
       />
-      <canvas
-        ref={canvasRef}
-        style={{ width: "100%", height: "100%", background: "black" }}
+      
+      {/* Слой 1: Фоновое изображение */}
+      <div
+        ref={backgroundLayerRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          filter: BACKGROUND_BLUR > 0 ? `blur(${BACKGROUND_BLUR}px)` : 'none',
+          zIndex: 0
+        }}
       />
 
+      {/* Слой 2: Текстовые блоки */}
       {blocks.map((b) => (
         <DraggableText
           key={b.id}
           block={b}
           selected={b.id === selectedBlockId}
-          onSelect={setSelectedBlockId}
+          onSelect={handleTextSelect}
           onUpdate={handleUpdate}
           parentRef={containerRef}
         />
       ))}
+
+      {/* Слой 3: Canvas с веб-камерой (прозрачный фон) */}
+      <canvas
+        ref={canvasRef}
+        style={{ 
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%", 
+          height: "100%", 
+          zIndex: 2,
+          pointerEvents: "none" // Чтобы клики проходили через canvas к тексту
+        }}
+      />
+
+      {/* Overlay и панель редактирования */}
+      {selectedBlockId && blocks.find(b => b.id === selectedBlockId) && (
+        <>
+          <div 
+            className="text-editor-overlay" 
+            onClick={() => setSelectedBlockId(null)}
+          />
+          <TextEditorPanel
+            key={selectedBlockId}
+            block={blocks.find(b => b.id === selectedBlockId)}
+            onUpdate={handleUpdate}
+            onClose={handleEditorClose}
+          />
+        </>
+      )}
     </div>
   );
 }
