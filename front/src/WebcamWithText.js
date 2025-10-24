@@ -50,7 +50,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       .catch(console.error);
 
     // Загрузка ONNX модели
-    ort.InferenceSession.create("/rvm_mobilenetv3_fp16.onnx", {
+    ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
       executionProviders: ['webgl', 'wasm']
     }).then((sess) => {
       console.log("Model loaded, execution providers:", sess.inputNames);

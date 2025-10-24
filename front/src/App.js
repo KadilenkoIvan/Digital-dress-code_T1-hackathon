@@ -2,19 +2,51 @@ import React, { useState } from "react";
 import WebcamWithText from "./WebcamWithText";
 
 function App() {
-  const [blocks, setBlocks] = useState([
-    { id: "b1", text: "Привет", x: 50, y: 50, fontSize: 24, fontFamily: "Arial" },
-    { id: "b2", text: "Мир", x: 200, y: 100, fontSize: 30, fontFamily: "Courier New" },
-  ]);
+  const [blocks, setBlocks] = useState([]);
 
-  const [selectedBlockId, setSelectedBlockId] = useState(null);
+  const currentLevel = blocks[0]?.level || "low";
 
-  const selectedBlock = blocks.find((b) => b.id === selectedBlockId);
+  const handleLevelChange = (level) => {
+    if (blocks.length === 0) {
+      setBlocks([{ id: "b1", level }]);
+    } else {
+      setBlocks([{ ...blocks[0], level }]);
+    }
+  };
 
-  const handleChange = (key, value) => {
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === selectedBlockId ? { ...b, [key]: value } : b))
-    );
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (blocks.length === 0) {
+          setBlocks([{ id: "b1", image: reader.result, level: currentLevel }]);
+        } else {
+          setBlocks([{ ...blocks[0], image: reader.result }]);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleJsonUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const json = JSON.parse(reader.result);
+          if (Array.isArray(json)) {
+            setBlocks(json);
+          } else {
+            alert("JSON должен быть массивом блоков!");
+          }
+        } catch (err) {
+          alert("Ошибка при чтении JSON: " + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
   };
 
   return (
@@ -22,51 +54,38 @@ function App() {
       <WebcamWithText
         blocks={blocks}
         setBlocks={setBlocks}
-        selectedBlockId={selectedBlockId}
-        setSelectedBlockId={setSelectedBlockId}
+        selectedBlockId={null}
+        setSelectedBlockId={() => {}}
       />
 
-      {selectedBlock && (
-        <div style={{ minWidth: "220px" }}>
-          <h3>Редактирование блока</h3>
-          <div>
-            <label>
-              Текст:
-              <input
-                type="text"
-                value={selectedBlock.text}
-                onChange={(e) => handleChange("text", e.target.value)}
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              Размер:
-              <input
-                type="number"
-                value={selectedBlock.fontSize}
-                onChange={(e) =>
-                  handleChange("fontSize", parseInt(e.target.value) || 1)
-                }
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              Шрифт:
-              <select
-                value={selectedBlock.fontFamily}
-                onChange={(e) => handleChange("fontFamily", e.target.value)}
-              >
-                <option value="Arial">Arial</option>
-                <option value="Courier New">Courier New</option>
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="Verdana">Verdana</option>
-              </select>
-            </label>
-          </div>
+      <div style={{ minWidth: "220px" }}>
+        <h3>Настройки</h3>
+        <div>
+          <label>
+            Выберите уровень приватности:
+            <select
+              value={currentLevel}
+              onChange={(e) => handleLevelChange(e.target.value)}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
         </div>
-      )}
+        <div>
+          <label>
+            Выберите изображение:
+            <input type="file" accept="image/*" onChange={handleImageChange} />
+          </label>
+        </div>
+        <div style={{ marginTop: "10px" }}>
+          <label>
+            Загрузите информацию о сотруднике:
+            <input type="file" accept=".json" onChange={handleJsonUpload} />
+          </label>
+        </div>
+      </div>
     </div>
   );
 }
