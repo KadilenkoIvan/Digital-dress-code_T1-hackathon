@@ -12,8 +12,22 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const frameCountRef = useRef(0);
   const totalTimeRef = useRef(0);
   const lastStatsUpdateRef = useRef(0); // Для throttling обновления статистики
+  const downsampleCanvasRef = useRef(null); // Canvas для уменьшенного изображения
+  const maskCanvasRef = useRef(null); // Canvas для маски уменьшенного размера
+  const fullMaskCanvasRef = useRef(null); // Canvas для маски полного размера
+  
+  // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
+  // Меньше значение = быстрее работа, но ниже качество
+  // Рекомендуемые значения: 0.3-0.5
+  const MODEL_SCALE = 0.4;
+  const downsampleRatioQuality = 0.6;
 
   useEffect(() => {
+    // Создаём временные canvas для обработки (переиспользуем на каждом кадре)
+    downsampleCanvasRef.current = document.createElement('canvas');
+    maskCanvasRef.current = document.createElement('canvas');
+    fullMaskCanvasRef.current = document.createElement('canvas');
+    
     // Получаем поток с камеры
     navigator.mediaDevices
       .getUserMedia({ video: true })
@@ -25,16 +39,17 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       })
       .catch(console.error);
 
-    // Настройка ONNX Runtime для правильной работы WebGL
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.simd = true;
-
-    // Загрузка ONNX модели (fp32 версия - быстрее без конвертации типов)
+    // Настройка ONNX Runtime - простая конфигурация без многопоточности
+    ort.env.wasm.numThreads = 1;  // Однопоточность (не требует crossOriginIsolation)
+    ort.env.wasm.simd = true;     // SIMD для ускорения
+    
+    // Загрузка ONNX модели
+    console.log("🔄 Loading model...");
     ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
-      executionProviders: ['wasm']  // Используем wasm (CPU с оптимизацией)
+      executionProviders: ['webgl', 'wasm']  // Стабильный WASM backend
     }).then((sess) => {
-      console.log("✅ Model loaded");
-      console.log("🎮 Execution provider:", sess.handler?._backend?.name || "wasm");
+      console.log("✅ Model loaded successfully!");
+      console.log("🎮 Backend:", "WASM (CPU with SIMD)");
       console.log("📊 Input names:", sess.inputNames);
       setSession(sess);
       // Инициализация recurrent states - используем float32
@@ -80,24 +95,37 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         if (session && recRef.current.length > 0) {
           const startTime = performance.now();
 
-          // Предобработка кадра
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          // Оригинальные размеры
+          const origWidth = canvas.width;
+          const origHeight = canvas.height;
           
-          const width = canvas.width;
-          const height = canvas.height;
-          const rgbData = new Float32Array(3 * width * height);
+          // Уменьшенные размеры для модели
+          const modelWidth = Math.round(origWidth * MODEL_SCALE);
+          const modelHeight = Math.round(origHeight * MODEL_SCALE);
+          
+          // Подготавливаем временный canvas для уменьшенного изображения
+          const downsampleCanvas = downsampleCanvasRef.current;
+          downsampleCanvas.width = modelWidth;
+          downsampleCanvas.height = modelHeight;
+          const downsampleCtx = downsampleCanvas.getContext('2d');
+          
+          // Рисуем уменьшенное видео
+          downsampleCtx.drawImage(video, 0, 0, modelWidth, modelHeight);
+          const imageData = downsampleCtx.getImageData(0, 0, modelWidth, modelHeight);
+          
+          const rgbData = new Float32Array(3 * modelWidth * modelHeight);
           
           // Конвертация в RGB и нормализация [0, 1]
-          for (let i = 0; i < width * height; i++) {
+          for (let i = 0; i < modelWidth * modelHeight; i++) {
             rgbData[i] = imageData.data[i * 4] / 255.0; // R
-            rgbData[width * height + i] = imageData.data[i * 4 + 1] / 255.0; // G
-            rgbData[2 * width * height + i] = imageData.data[i * 4 + 2] / 255.0; // B
+            rgbData[modelWidth * modelHeight + i] = imageData.data[i * 4 + 1] / 255.0; // G
+            rgbData[2 * modelWidth * modelHeight + i] = imageData.data[i * 4 + 2] / 255.0; // B
           }
 
-          // Используем float32 - ONNX Runtime конвертирует сам на GPU
-          const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, height, width]);
-          const downsampleRatio = new ort.Tensor("float32", new Float32Array([0.25]), [1]);
+          // Передаём уменьшенное изображение в модель
+          const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, modelHeight, modelWidth]);
+          // downsample_ratio - параметр внутренней оптимизации модели (0.6 = хороший баланс)
+          const downsampleRatio = new ort.Tensor("float32", new Float32Array([downsampleRatioQuality]), [1]);
 
           try {
             // Запуск модели
@@ -115,9 +143,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             const results = await session.run(feeds);
             const modelInferenceTime = performance.now() - modelStartTime;
             
-            // Извлечение результатов
-            const fgr = results.fgr.data;
-            const pha = results.pha.data;
+            // Извлечение результатов (они в уменьшенном размере)
+            const phaSmall = results.pha.data;  // Маска уменьшенного размера
             
             // Обновление rec states
             if (results.r1o) recRef.current[0] = results.r1o;
@@ -125,21 +152,51 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             if (results.r3o) recRef.current[2] = results.r3o;
             if (results.r4o) recRef.current[3] = results.r4o;
 
-            // Композитинг с фоном (оптимизированный)
-            const background = backgroundRef.current;
-            const outputData = new Uint8ClampedArray(width * height * 4);
-            const pixelCount = width * height;
-            const channelSize = pixelCount;
+            // Рисуем оригинальное видео на основной canvas
+            ctx.drawImage(video, 0, 0, origWidth, origHeight);
+            const originalImageData = ctx.getImageData(0, 0, origWidth, origHeight);
             
-            for (let i = 0; i < pixelCount; i++) {
-              const alpha = pha[i];
-              const oneMinusAlpha = 1 - alpha;
+            // Масштабируем маску обратно до оригинального размера
+            // Используем переиспользуемые canvas
+            const maskCanvas = maskCanvasRef.current;
+            maskCanvas.width = modelWidth;
+            maskCanvas.height = modelHeight;
+            const maskCtx = maskCanvas.getContext('2d');
+            const maskImageData = maskCtx.createImageData(modelWidth, modelHeight);
+            
+            // Заполняем уменьшенную маску (grayscale)
+            for (let i = 0; i < modelWidth * modelHeight; i++) {
+              const alpha = Math.min(1, Math.max(0, phaSmall[i]));
+              const alphaVal = alpha * 255;
+              maskImageData.data[i * 4] = alphaVal;
+              maskImageData.data[i * 4 + 1] = alphaVal;
+              maskImageData.data[i * 4 + 2] = alphaVal;
+              maskImageData.data[i * 4 + 3] = 255;
+            }
+            
+            maskCtx.putImageData(maskImageData, 0, 0);
+            
+            // Масштабируем маску до оригинального размера
+            const fullMaskCanvas = fullMaskCanvasRef.current;
+            fullMaskCanvas.width = origWidth;
+            fullMaskCanvas.height = origHeight;
+            const fullMaskCtx = fullMaskCanvas.getContext('2d');
+            fullMaskCtx.drawImage(maskCanvas, 0, 0, origWidth, origHeight);
+            const fullMaskData = fullMaskCtx.getImageData(0, 0, origWidth, origHeight);
+
+            // Композитинг с фоном используя оригинальное видео и увеличенную маску
+            const background = backgroundRef.current;
+            const outputData = new Uint8ClampedArray(origWidth * origHeight * 4);
+            
+            for (let i = 0; i < origWidth * origHeight; i++) {
               const i4 = i * 4;
+              const alpha = fullMaskData.data[i4] / 255.0;  // Берем альфа из увеличенной маски
+              const oneMinusAlpha = 1 - alpha;
               
-              // Uint8ClampedArray автоматически клампит значения в [0, 255]
-              const r = fgr[i] * 255;
-              const g = fgr[channelSize + i] * 255;
-              const b = fgr[2 * channelSize + i] * 255;
+              // Берем цвет из оригинального видео
+              const r = originalImageData.data[i4];
+              const g = originalImageData.data[i4 + 1];
+              const b = originalImageData.data[i4 + 2];
               
               const bgR = background ? background.data[i4] : 26;
               const bgG = background ? background.data[i4 + 1] : 26;
@@ -151,7 +208,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               outputData[i4 + 3] = 255;
             }
 
-            const outputImageData = new ImageData(outputData, width, height);
+            const outputImageData = new ImageData(outputData, origWidth, origHeight);
             ctx.putImageData(outputImageData, 0, 0);
 
             // Расчет FPS (общее время кадра)
