@@ -15,11 +15,8 @@ function App() {
   const currentLevel = blocks[0]?.level || "low";
 
   const handleLevelChange = (level) => {
-    if (blocks.length === 0) {
-      setBlocks([{ id: "b1", level }]);
-    } else {
-      setBlocks([{ ...blocks[0], level }]);
-    }
+    if (blocks.length === 0) return;
+    setBlocks(prev => prev.map(b => b.id === "b1" ? { ...b, level } : b));
   };
 
   const handleImageChange = (e) => {
@@ -39,22 +36,30 @@ function App() {
 
   const handleJsonUpload = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const json = JSON.parse(reader.result);
-          if (Array.isArray(json)) {
-            setBlocks(json);
-          } else {
-            alert("JSON должен быть массивом блоков!");
-          }
-        } catch (err) {
-          alert("Ошибка при чтении JSON: " + err.message);
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(reader.result);
+        if (!json.employee) {
+          alert("JSON должен содержать объект employee!");
+          return;
         }
-      };
-      reader.readAsText(file);
-    }
+
+        setBlocks(prev => {
+          const bgBlock = prev.find(b => b.id === "b1") || { id: "b1" };
+          return [{
+            ...bgBlock,
+            employee: json.employee,
+            level: json.employee.privacy_level || "low"
+          }];
+        });
+      } catch (err) {
+        alert("Ошибка при чтении JSON: " + err.message);
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -92,6 +97,7 @@ function App() {
           selectedBlockId={null}
           setSelectedBlockId={() => {}}
           onStatsUpdate={setStats}
+          backgroundImage={blocks[0]?.image || null}
         />
       </div>
 
@@ -99,7 +105,7 @@ function App() {
         <h3>Настройки</h3>
         <div className="setting-group">
           <label>
-            Уровень приватности:
+            Уровень отображения персональных данных:
             <select
               value={currentLevel}
               onChange={(e) => handleLevelChange(e.target.value)}

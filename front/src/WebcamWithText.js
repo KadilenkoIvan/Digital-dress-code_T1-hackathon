@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import * as ort from "onnxruntime-web";
 import DraggableText from "./DraggableText";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -60,19 +60,57 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1])
       ];
     }).catch(console.error);
-
-    // Создание фона
-    const bgCanvas = document.createElement('canvas');
-    bgCanvas.width = 1280;
-    bgCanvas.height = 960;
-    const bgCtx = bgCanvas.getContext('2d');
-    const gradient = bgCtx.createLinearGradient(0, 0, 1280, 960);
-    gradient.addColorStop(0, '#1a1a2e');
-    gradient.addColorStop(1, '#16213e');
-    bgCtx.fillStyle = gradient;
-    bgCtx.fillRect(0, 0, 1280, 960);
-    backgroundRef.current = bgCtx.getImageData(0, 0, 1280, 960);
   }, []);
+
+  // Создание фона
+  useEffect(() => {
+    const updateBackground = () => {
+      if (!videoRef.current) return;
+      const video = videoRef.current;
+
+      // Ждём, пока видео определит размеры
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        requestAnimationFrame(updateBackground);
+        return;
+      }
+
+      const canvasW = video.videoWidth;
+      const canvasH = video.videoHeight;
+
+      const bgCanvas = document.createElement('canvas');
+      bgCanvas.width = canvasW;
+      bgCanvas.height = canvasH;
+      const bgCtx = bgCanvas.getContext('2d');
+
+      if (backgroundImage) {
+        const img = new Image();
+        img.onload = () => {
+          const imgW = img.width;
+          const imgH = img.height;
+
+          // Масштабирование как в CSS background-size: cover
+          const scale = Math.max(canvasW / imgW, canvasH / imgH);
+          const scaledW = imgW * scale;
+          const scaledH = imgH * scale;
+          const offsetX = (canvasW - scaledW) / 2;
+          const offsetY = (canvasH - scaledH) / 2;
+
+          bgCtx.drawImage(img, offsetX, offsetY, scaledW, scaledH);
+          backgroundRef.current = bgCtx.getImageData(0, 0, canvasW, canvasH);
+        };
+        img.src = backgroundImage;
+      } else {
+        // fallback: градиент, под размер видео
+        const gradient = bgCtx.createLinearGradient(0, 0, canvasW, canvasH);
+        gradient.addColorStop(0, '#1a1a2e');
+        gradient.addColorStop(1, '#16213e');
+        bgCtx.fillStyle = gradient;
+        bgCtx.fillRect(0, 0, canvasW, canvasH);
+        backgroundRef.current = bgCtx.getImageData(0, 0, canvasW, canvasH);
+      }
+    };
+  updateBackground();
+}, [backgroundImage]);
 
   useEffect(() => {
     let animationId;
@@ -272,6 +310,33 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       }
     };
   }, [session]);
+
+  useEffect(() => {
+    const bgBlock = blocks.find(b => b.id === "b1");
+    if (!bgBlock?.employee) return;
+
+    const employee = bgBlock.employee;
+    const privacyLevel = bgBlock.level || employee.privacy_level || "low";
+
+    const textBlocks = [];
+
+    textBlocks.push({ id: "name", text: employee.full_name, x: 20, y: 20, fontSize: 24, color: "white" });
+    textBlocks.push({ id: "position", text: employee.position, x: 20, y: 60, fontSize: 20, color: "white" });
+
+    if (privacyLevel === "medium" || privacyLevel === "high") {
+      textBlocks.push({ id: "company", text: employee.company, x: 20, y: 100, fontSize: 18, color: "white" });
+      textBlocks.push({ id: "department", text: employee.department, x: 20, y: 140, fontSize: 18, color: "white" });
+      textBlocks.push({ id: "location", text: employee.office_location, x: 20, y: 180, fontSize: 18, color: "white" });
+    }
+
+    if (privacyLevel === "high") {
+      textBlocks.push({ id: "email", text: `Email: ${employee.contact.email}`, x: 20, y: 220, fontSize: 16, color: "white" });
+      textBlocks.push({ id: "telegram", text: `Telegram: ${employee.contact.telegram}`, x: 20, y: 260, fontSize: 16, color: "white" });
+    }
+
+    // Сохраняем блок с фоном + текстовые блоки
+    setBlocks([bgBlock, ...textBlocks]);
+  }, [blocks[0]?.employee, blocks[0]?.level]);
 
   const handleUpdate = (id, newProps) => {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...newProps } : b)));
