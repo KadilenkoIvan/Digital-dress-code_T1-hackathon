@@ -21,18 +21,29 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
   // Рекомендуемые значения: 0.3-0.5
-  const MODEL_SCALE = 0.3; // 0.2-0.5: меньше = быстрее работа, но ниже качество (0.25 = хороший баланс)
-  const downsampleRatioQuality = 0.75; // 0.5-0.9: меньше = быстрее работа, но ниже качество (0.8 = хороший баланс)
+  const MODEL_SCALE = 0.2; // 0.2-0.5: меньше = быстрее работа, но ниже качество (0.25 = хороший баланс)
+  const downsampleRatioQuality = 0.8; // 0.5-0.9: меньше = быстрее работа, но ниже качество (0.8 = хороший баланс)
   //MODEL_SCALE = 0.35, downsampleRatioQuality = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
-  //MODEL_SCALE = 0.25, downsampleRatioQuality = 0.8 = нормкальное качество (съедает наушники), 30-35мс модели и 45-55мс на кадр
+  //MODEL_SCALE = 0.25, downsampleRatioQuality = 0.8 = нормкальное качество (съедает наушники), 30-35мс модели и 45-55мс на кад
+  //MODEL_SCALE = 0.2, downsampleRatioQuality = 0.7 = так себе качество (съедает руки), 20-25мс модели и 30-35мс на кадр
+  //MODEL_SCALE = 0.3, downsampleRatioQuality = 0.7 = нормальное качество, 35-40мс модели и 45-50мс на кадр
+  //MODEL_SCALE = 0.2, downsampleRatioQuality = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
+  
+  // Параметры предобработки входного изображения
+  const USE_GAMMA_CORRECTION = true; // true/false: коррекция яркости для улучшения контраста
+  const GAMMA = 1.5; // 1.0-1.3: гамма-коррекция (>1 = осветление темных областей, улучшает сегментацию)
   
   // Параметры постобработки маски
-  const TEMPORAL_SMOOTHING = 0.95; // 0.5-0.95: больше = быстрее реакция (меньше шлейф), но больше мерцания (0.95 = хороший баланс)
-  const BLUR_RADIUS = 0.35; // 0-3: радиус размытия маски (меньше = четче края, но возможны артефакты) (0.35 = хороший баланс)
+  const TEMPORAL_SMOOTHING = 0.85; // 0.5-0.95: больше = быстрее реакция (меньше шлейф), но больше мерцания
+  const ADAPTIVE_SMOOTHING = true; // true/false: адаптивное сглаживание (меньше шлейф при движении)
+  const BLUR_RADIUS = 0.35; // 0-3: радиус размытия маски (меньше = четче края, но возможны артефакты)
   
-  // Морфологические операции (Opening + Closing)
-  const USE_MORPHOLOGY = false; // true/false: включить/выключить морфологические операции
+  // Морфологические операции (Opening + Closing) - убирают шум и заполняют дыры
+  const USE_MORPHOLOGY = true; // true/false: включить/выключить морфологические операции
   const MORPH_RADIUS = 1; // 1-2: радиус для erosion/dilation (больше = сильнее эффект, но медленнее)
+  
+  // Параметры обработки фона
+  const BACKGROUND_BLUR = 0; // 0-5: радиус размытия фона (px), применяется при загрузке фона
   
   // Функция Erosion (сужение маски, убирает шум)
   const applyErosion = (imageData, width, height, radius) => {
@@ -85,6 +96,36 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     }
     
     data.set(output);
+  };
+  
+  // Функция Гамма-коррекции (осветляет темные области, улучшает контраст)
+  const applyGammaCorrection = (imageData, gamma) => {
+    const data = imageData.data;
+    const gammaCorrection = 1 / gamma;
+    
+    // Предвычисляем таблицу для ускорения (256 значений)
+    const lookupTable = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      lookupTable[i] = Math.min(255, Math.max(0, 255 * Math.pow(i / 255, gammaCorrection)));
+    }
+    
+    // Применяем к каждому пикселю (только RGB, не альфа)
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = lookupTable[data[i]];         // R
+      data[i + 1] = lookupTable[data[i + 1]]; // G
+      data[i + 2] = lookupTable[data[i + 2]]; // B
+    }
+  };
+  
+  // Функция для вычисления разницы между масками (для адаптивного smoothing)
+  const calculateMaskDifference = (mask1, mask2) => {
+    if (!mask1 || !mask2 || mask1.length !== mask2.length) return 1.0;
+    
+    let totalDiff = 0;
+    for (let i = 0; i < mask1.length; i++) {
+      totalDiff += Math.abs(mask1[i] - mask2[i]);
+    }
+    return totalDiff / mask1.length;
   };
   
   useEffect(() => {
@@ -186,7 +227,13 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           const offsetX = (canvasW - scaledW) / 2;
           const offsetY = (canvasH - scaledH) / 2;
 
+          // Применяем размытие к фону для скрытия артефактов композитинга
+          if (BACKGROUND_BLUR > 0) {
+            bgCtx.filter = `blur(${BACKGROUND_BLUR}px)`;
+          }
           bgCtx.drawImage(img, offsetX, offsetY, scaledW, scaledH);
+          bgCtx.filter = 'none'; // Сбрасываем фильтр
+          
           backgroundRef.current = bgCtx.getImageData(0, 0, canvasW, canvasH);
         };
         img.src = backgroundImage;
@@ -242,6 +289,11 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           downsampleCtx.drawImage(video, 0, 0, modelWidth, modelHeight);
           const imageData = downsampleCtx.getImageData(0, 0, modelWidth, modelHeight);
           
+          // Применяем гамма-коррекцию для улучшения контраста (особенно в темных условиях)
+          if (USE_GAMMA_CORRECTION && GAMMA !== 1.0) {
+            applyGammaCorrection(imageData, GAMMA);
+          }
+          
           const rgbData = new Float32Array(3 * modelWidth * modelHeight);
           
           // Конвертация в RGB и нормализация [0, 1]
@@ -295,9 +347,22 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             
             // 1. Temporal Smoothing (EMA) - сглаживание между кадрами
             const prevMask = prevMaskRef.current;
+            let smoothingCoeff = TEMPORAL_SMOOTHING;
+            
             if (prevMask && prevMask.length === phaSmall.length) {
+              // Адаптивное сглаживание: при большом движении используем меньший коэффициент
+              if (ADAPTIVE_SMOOTHING) {
+                const diff = calculateMaskDifference(phaSmall, prevMask);
+                // Если изменение большое (движение), используем больший вес новой маски
+                // diff в диапазоне [0, 1], обычно 0.01-0.3
+                // При diff > 0.1 (сильное движение) увеличиваем реактивность
+                if (diff > 0.05) {
+                  smoothingCoeff = Math.max(0.3, TEMPORAL_SMOOTHING - diff * 2);
+                }
+              }
+              
               for (let i = 0; i < phaSmall.length; i++) {
-                phaSmall[i] = phaSmall[i] * TEMPORAL_SMOOTHING + prevMask[i] * (1 - TEMPORAL_SMOOTHING);
+                phaSmall[i] = phaSmall[i] * smoothingCoeff + prevMask[i] * (1 - smoothingCoeff);
               }
             }
             // Сохраняем текущую маску для следующего кадра
