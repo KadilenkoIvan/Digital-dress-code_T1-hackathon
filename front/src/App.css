@@ -1,38 +1,161 @@
-.App {
-  text-align: center;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
   min-height: 100vh;
+  color: #333;
+}
+
+.app-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 2rem;
+  gap: 2rem;
+}
+
+.webcam-wrapper {
+  flex-shrink: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  background: #000;
+}
+
+.stats-panel {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  min-width: 300px;
+  max-width: 350px;
+}
+
+.settings-panel {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  min-width: 300px;
+  max-width: 350px;
+}
+
+.stats-panel h3,
+.settings-panel h3 {
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+  color: #2a5298;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 0.5rem;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #2a5298;
+  transition: all 0.3s ease;
+}
+
+.stat-item:hover {
+  background: #e9ecef;
+  transform: translateX(5px);
+}
+
+.stat-label {
+  font-weight: 600;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.stat-value {
+  font-weight: 700;
+  color: #2a5298;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
+}
+
+.stat-value.active {
+  color: #28a745;
+}
+
+.stat-value.inactive {
+  color: #dc3545;
+}
+
+.setting-group {
+  margin-bottom: 1.5rem;
+}
+
+.setting-group label {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  gap: 0.5rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.setting-group select,
+.setting-group input[type="file"] {
+  padding: 0.6rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  background: white;
+  cursor: pointer;
+}
+
+.setting-group select:hover,
+.setting-group input[type="file"]:hover {
+  border-color: #2a5298;
+}
+
+.setting-group select:focus,
+.setting-group input[type="file"]:focus {
+  outline: none;
+  border-color: #2a5298;
+  box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.1);
+}
+
+.setting-group input[type="file"] {
+  padding: 0.4rem;
+}
+
+.setting-group input[type="file"]::file-selector-button {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: #2a5298;
   color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 0.5rem;
+  font-weight: 500;
+  transition: background 0.3s ease;
 }
 
-.App-link {
-  color: #61dafb;
+.setting-group input[type="file"]::file-selector-button:hover {
+  background: #1e3c72;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+@media (max-width: 1920px) {
+  .app-container {
+    flex-direction: column;
   }
-  to {
-    transform: rotate(360deg);
+  
+  .stats-panel,
+  .settings-panel {
+    max-width: 1280px;
+    width: 100%;
   }
 }

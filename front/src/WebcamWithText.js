@@ -2,32 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import * as ort from "onnxruntime-web";
 import DraggableText from "./DraggableText";
 
-// Конвертация float32 в float16
-function floatToFloat16(value) {
-  const floatView = new Float32Array(1);
-  const int32View = new Int32Array(floatView.buffer);
-  floatView[0] = value;
-  const x = int32View[0];
-  let bits = (x >> 16) & 0x8000;
-  let m = (x >> 12) & 0x07ff;
-  const e = (x >> 23) & 0xff;
-  if (e < 103) return bits;
-  if (e > 142) {
-    bits |= 0x7c00;
-    bits |= ((e === 255) ? 0 : 1) && (x & 0x007fffff);
-    return bits;
-  }
-  if (e < 113) {
-    m |= 0x0800;
-    bits |= (m >> (114 - e)) + ((m >> (113 - e)) & 1);
-    return bits;
-  }
-  bits |= ((e - 112) << 10) | (m >> 1);
-  bits += m & 1;
-  return bits;
-}
-
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -36,6 +11,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const backgroundRef = useRef(null);
   const frameCountRef = useRef(0);
   const totalTimeRef = useRef(0);
+  const lastStatsUpdateRef = useRef(0); // Для throttling обновления статистики
 
   useEffect(() => {
     // Получаем поток с камеры
@@ -49,32 +25,38 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       })
       .catch(console.error);
 
-    // Загрузка ONNX модели
+    // Настройка ONNX Runtime для правильной работы WebGL
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.simd = true;
+
+    // Загрузка ONNX модели (fp32 версия - быстрее без конвертации типов)
     ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
-      executionProviders: ['webgl', 'wasm']
+      executionProviders: ['wasm']  // Используем wasm (CPU с оптимизацией)
     }).then((sess) => {
-      console.log("Model loaded, execution providers:", sess.inputNames);
+      console.log("✅ Model loaded");
+      console.log("🎮 Execution provider:", sess.handler?._backend?.name || "wasm");
+      console.log("📊 Input names:", sess.inputNames);
       setSession(sess);
-      // Инициализация recurrent states - должны быть float16
+      // Инициализация recurrent states - используем float32
       recRef.current = [
-        new ort.Tensor("float16", new Uint16Array(1), [1, 1, 1, 1]),
-        new ort.Tensor("float16", new Uint16Array(1), [1, 1, 1, 1]),
-        new ort.Tensor("float16", new Uint16Array(1), [1, 1, 1, 1]),
-        new ort.Tensor("float16", new Uint16Array(1), [1, 1, 1, 1])
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1])
       ];
     }).catch(console.error);
 
     // Создание фона
     const bgCanvas = document.createElement('canvas');
-    bgCanvas.width = 640;
-    bgCanvas.height = 480;
+    bgCanvas.width = 1280;
+    bgCanvas.height = 960;
     const bgCtx = bgCanvas.getContext('2d');
-    const gradient = bgCtx.createLinearGradient(0, 0, 640, 480);
+    const gradient = bgCtx.createLinearGradient(0, 0, 1280, 960);
     gradient.addColorStop(0, '#1a1a2e');
     gradient.addColorStop(1, '#16213e');
     bgCtx.fillStyle = gradient;
-    bgCtx.fillRect(0, 0, 640, 480);
-    backgroundRef.current = bgCtx.getImageData(0, 0, 640, 480);
+    bgCtx.fillRect(0, 0, 1280, 960);
+    backgroundRef.current = bgCtx.getImageData(0, 0, 1280, 960);
   }, []);
 
   useEffect(() => {
@@ -113,13 +95,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             rgbData[2 * width * height + i] = imageData.data[i * 4 + 2] / 255.0; // B
           }
 
-          // Конвертация в float16 для src
-          const float16Data = new Uint16Array(rgbData.length);
-          for (let i = 0; i < rgbData.length; i++) {
-            float16Data[i] = floatToFloat16(rgbData[i]);
-          }
-
-          const inputTensor = new ort.Tensor("float16", float16Data, [1, 3, height, width]);
+          // Используем float32 - ONNX Runtime конвертирует сам на GPU
+          const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, height, width]);
           const downsampleRatio = new ort.Tensor("float32", new Float32Array([0.25]), [1]);
 
           try {
@@ -133,7 +110,10 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               downsample_ratio: downsampleRatio
             };
 
+            // Измерение времени только для модели
+            const modelStartTime = performance.now();
             const results = await session.run(feeds);
+            const modelInferenceTime = performance.now() - modelStartTime;
             
             // Извлечение результатов
             const fgr = results.fgr.data;
@@ -145,50 +125,82 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             if (results.r3o) recRef.current[2] = results.r3o;
             if (results.r4o) recRef.current[3] = results.r4o;
 
-            // Композитинг с фоном
+            // Композитинг с фоном (оптимизированный)
             const background = backgroundRef.current;
             const outputData = new Uint8ClampedArray(width * height * 4);
+            const pixelCount = width * height;
+            const channelSize = pixelCount;
             
-            for (let i = 0; i < width * height; i++) {
+            for (let i = 0; i < pixelCount; i++) {
               const alpha = pha[i];
-              const r = Math.min(255, Math.max(0, fgr[i] * 255));
-              const g = Math.min(255, Math.max(0, fgr[width * height + i] * 255));
-              const b = Math.min(255, Math.max(0, fgr[2 * width * height + i] * 255));
+              const oneMinusAlpha = 1 - alpha;
+              const i4 = i * 4;
               
-              const bgR = background ? background.data[i * 4] : 26;
-              const bgG = background ? background.data[i * 4 + 1] : 26;
-              const bgB = background ? background.data[i * 4 + 2] : 46;
+              // Uint8ClampedArray автоматически клампит значения в [0, 255]
+              const r = fgr[i] * 255;
+              const g = fgr[channelSize + i] * 255;
+              const b = fgr[2 * channelSize + i] * 255;
               
-              outputData[i * 4] = r * alpha + bgR * (1 - alpha);
-              outputData[i * 4 + 1] = g * alpha + bgG * (1 - alpha);
-              outputData[i * 4 + 2] = b * alpha + bgB * (1 - alpha);
-              outputData[i * 4 + 3] = 255;
+              const bgR = background ? background.data[i4] : 26;
+              const bgG = background ? background.data[i4 + 1] : 26;
+              const bgB = background ? background.data[i4 + 2] : 46;
+              
+              outputData[i4] = r * alpha + bgR * oneMinusAlpha;
+              outputData[i4 + 1] = g * alpha + bgG * oneMinusAlpha;
+              outputData[i4 + 2] = b * alpha + bgB * oneMinusAlpha;
+              outputData[i4 + 3] = 255;
             }
 
             const outputImageData = new ImageData(outputData, width, height);
             ctx.putImageData(outputImageData, 0, 0);
 
-            // Расчет FPS
+            // Расчет FPS (общее время кадра)
             const frameTime = performance.now() - startTime;
             totalTimeRef.current += frameTime;
             frameCountRef.current += 1;
             const fps = 1000.0 / frameTime;
             const avgFps = (frameCountRef.current * 1000.0) / totalTimeRef.current;
 
-            ctx.fillStyle = 'red';
-            ctx.font = '20px Arial';
-            ctx.fillText(`FPS: ${fps.toFixed(2)}`, 10, 30);
-            ctx.fillStyle = 'orange';
-            ctx.font = '16px Arial';
-            ctx.fillText(`Avg FPS: ${avgFps.toFixed(2)}`, 10, 55);
-            ctx.fillStyle = 'yellow';
-            ctx.fillText(`Frame time: ${frameTime.toFixed(2)} ms`, 10, 80);
+            // Отправка статистики в родительский компонент (throttled - раз в 100ms)
+            const now = performance.now();
+            if (onStatsUpdate && (now - lastStatsUpdateRef.current) > 100) {
+              lastStatsUpdateRef.current = now;
+              onStatsUpdate({
+                fps: fps.toFixed(2),
+                avgFps: avgFps.toFixed(2),
+                modelTime: modelInferenceTime.toFixed(2), // Время только модели
+                fullFrameTime: frameTime.toFixed(2), // Полное время обработки кадра
+                modelActive: true
+              });
+            }
           } catch (error) {
             console.error("Model inference error:", error);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const now = performance.now();
+            if (onStatsUpdate && (now - lastStatsUpdateRef.current) > 100) {
+              lastStatsUpdateRef.current = now;
+              onStatsUpdate({
+                fps: null,
+                avgFps: null,
+                modelTime: null,
+                fullFrameTime: null,
+                modelActive: false
+              });
+            }
           }
         } else {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const now = performance.now();
+          if (onStatsUpdate && (now - lastStatsUpdateRef.current) > 100) {
+            lastStatsUpdateRef.current = now;
+            onStatsUpdate({
+              fps: null,
+              avgFps: null,
+              modelTime: null,
+              fullFrameTime: null,
+              modelActive: false
+            });
+          }
         }
       }
 
@@ -215,9 +227,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       ref={containerRef}
       style={{
         position: "relative",
-        width: "640px",
-        height: "480px",
-        border: "1px solid #333",
+        width: "1280px",
+        height: "960px",
         overflow: "hidden",
       }}
       onClick={handleBackgroundClick}
