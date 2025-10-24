@@ -6,7 +6,7 @@ import TextEditorPanel from "./TextEditorPanel";
 import ImageEditorPanel from "./ImageEditorPanel";
 import "./TextEditorPanel.css";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4 }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -28,14 +28,13 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
   // Рекомендуемые значения: 0.1-1.0 (управляется через UI)
-  // modelScale передается как пропс из App.js
-  const downsampleRatioQuality = 0.8; // 0.5-0.9: меньше = быстрее работа, но ниже качество (0.8 = хороший баланс)
+  // modelScale и downsampleRatio передаются как пропсы из App.js
   //Примеры производительности:
-  //modelScale = 0.35, downsampleRatioQuality = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
-  //modelScale = 0.25, downsampleRatioQuality = 0.8 = нормальное качество (съедает наушники), 30-35мс модели и 45-55мс на кадр
-  //modelScale = 0.2, downsampleRatioQuality = 0.7 = так себе качество (съедает руки), 20-25мс модели и 30-35мс на кадр
-  //modelScale = 0.3, downsampleRatioQuality = 0.7 = нормальное качество, 35-40мс модели и 45-50мс на кадр
-  //modelScale = 0.2, downsampleRatioQuality = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
+  //modelScale = 0.35, downsampleRatio = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
+  //modelScale = 0.25, downsampleRatio = 0.8 = нормальное качество (съедает наушники), 30-35мс модели и 45-55мс на кадр
+  //modelScale = 0.2, downsampleRatio = 0.7 = так себе качество (съедает руки), 20-25мс модели и 30-35мс на кадр
+  //modelScale = 0.3, downsampleRatio = 0.7 = нормальное качество, 35-40мс модели и 45-50мс на кадр
+  //modelScale = 0.2, downsampleRatio = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
   
   // Параметры предобработки входного изображения
   const USE_GAMMA_CORRECTION = true; // true/false: коррекция яркости для улучшения контраста
@@ -310,8 +309,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
 
           // Передаём уменьшенное изображение в модель
           const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, modelHeight, modelWidth]);
-          // downsample_ratio - параметр внутренней оптимизации модели (0.6 = хороший баланс)
-          const downsampleRatio = new ort.Tensor("float32", new Float32Array([downsampleRatioQuality]), [1]);
+          // downsample_ratio - параметр внутренней оптимизации модели (0.8 = хороший баланс)
+          const downsampleRatioTensor = new ort.Tensor("float32", new Float32Array([downsampleRatio]), [1]);
 
           try {
             // Запуск модели
@@ -321,7 +320,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               r2i: recRef.current[1],
               r3i: recRef.current[2],
               r4i: recRef.current[3],
-              downsample_ratio: downsampleRatio
+              downsample_ratio: downsampleRatioTensor
             };
 
             // Измерение времени только для модели
@@ -509,9 +508,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         cancelAnimationFrame(animationId);
       }
     };
-  }, [session, modelScale]);
+  }, [session, modelScale, downsampleRatio]);
 
-  // Сброс рекуррентных состояний при изменении modelScale
+  // Сброс рекуррентных состояний при изменении modelScale или downsampleRatio
   useEffect(() => {
     if (recRef.current.length > 0) {
       // Сбрасываем рекуррентные состояния к начальным значениям
@@ -521,9 +520,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1])
       ];
-      console.log("🔄 Recurrent states reset due to modelScale change:", modelScale);
+      console.log("🔄 Recurrent states reset due to parameter change. modelScale:", modelScale, "downsampleRatio:", downsampleRatio);
     }
-  }, [modelScale]);
+  }, [modelScale, downsampleRatio]);
 
   // Мемоизируем блок "b1" и его ключевые свойства для оптимизации
   const bgBlockData = useMemo(() => {
