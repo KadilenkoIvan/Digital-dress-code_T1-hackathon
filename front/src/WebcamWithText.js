@@ -45,6 +45,13 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const ADAPTIVE_SMOOTHING = true; // true/false: адаптивное сглаживание (меньше шлейф при движении)
   const BLUR_RADIUS = 0.35; // 0-3: радиус размытия маски (меньше = четче края, но возможны артефакты)
   
+  // Параметры bilateral blur для входного изображения
+  const USE_BILATERAL_BLUR = true; // true/false: включить/выключить bilateral blur
+  const BILATERAL_RADIUS = 2; // 1-5: радиус размытия (больше = сильнее размытие)
+  const BILATERAL_SPATIAL_SIGMA = 2.0; // 1.0-5.0: пространственная сигма (влияет на пространственное размытие)
+  const BILATERAL_COLOR_SIGMA = 30.0; // 10.0-50.0: цветовая сигма (сохранение краев по цвету)
+  const LIGHTING_THRESHOLD = 0.3; // 0.1-0.5: порог яркости для применения размытия (меньше = чаще применяется)
+  
   // Морфологические операции (Opening + Closing) - убирают шум и заполняют дыры
   const USE_MORPHOLOGY = true; // true/false: включить/выключить морфологические операции
   const MORPH_RADIUS = 1; // 1-2: радиус для erosion/dilation (больше = сильнее эффект, но медленнее)
@@ -130,6 +137,100 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       totalDiff += Math.abs(mask1[i] - mask2[i]);
     }
     return totalDiff / mask1.length;
+  };
+  
+  // Функция для анализа качества освещенности изображения
+  const analyzeLightingQuality = (imageData) => {
+    const data = imageData.data;
+    let totalBrightness = 0;
+    let pixelCount = 0;
+    
+    // Вычисляем среднюю яркость (используем luminance формулу)
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Формула luminance: 0.299*R + 0.587*G + 0.114*B
+      const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+      totalBrightness += brightness;
+      pixelCount++;
+    }
+    
+    const averageBrightness = totalBrightness / pixelCount / 255.0; // Нормализуем к [0, 1]
+    return averageBrightness;
+  };
+  
+  // Функция bilateral blur (сохраняет края, размывает шум)
+  const applyBilateralBlur = (imageData, width, height, radius, spatialSigma, colorSigma) => {
+    const data = imageData.data;
+    const output = new Uint8ClampedArray(data.length);
+    
+    // Предвычисляем весовые функции для ускорения
+    const spatialWeights = new Array(radius * 2 + 1);
+    const colorWeights = new Array(256);
+    
+    // Пространственные веса (гауссова функция)
+    for (let i = -radius; i <= radius; i++) {
+      spatialWeights[i + radius] = Math.exp(-(i * i) / (2 * spatialSigma * spatialSigma));
+    }
+    
+    // Цветовые веса
+    for (let i = 0; i < 256; i++) {
+      colorWeights[i] = Math.exp(-(i * i) / (2 * colorSigma * colorSigma));
+    }
+    
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const centerIdx = (y * width + x) * 4;
+        const centerR = data[centerIdx];
+        const centerG = data[centerIdx + 1];
+        const centerB = data[centerIdx + 2];
+        
+        let weightedSumR = 0, weightedSumG = 0, weightedSumB = 0;
+        let totalWeight = 0;
+        
+        // Проходим по окрестности
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              const neighborIdx = (ny * width + nx) * 4;
+              const neighborR = data[neighborIdx];
+              const neighborG = data[neighborIdx + 1];
+              const neighborB = data[neighborIdx + 2];
+              
+              // Пространственный вес
+              const spatialWeight = spatialWeights[dx + radius] * spatialWeights[dy + radius];
+              
+              // Цветовой вес (разность цветов)
+              const colorDiffR = Math.abs(centerR - neighborR);
+              const colorDiffG = Math.abs(centerG - neighborG);
+              const colorDiffB = Math.abs(centerB - neighborB);
+              const avgColorDiff = (colorDiffR + colorDiffG + colorDiffB) / 3;
+              
+              const colorWeight = colorWeights[Math.round(avgColorDiff)];
+              
+              const weight = spatialWeight * colorWeight;
+              
+              weightedSumR += neighborR * weight;
+              weightedSumG += neighborG * weight;
+              weightedSumB += neighborB * weight;
+              totalWeight += weight;
+            }
+          }
+        }
+        
+        output[centerIdx] = weightedSumR / totalWeight;
+        output[centerIdx + 1] = weightedSumG / totalWeight;
+        output[centerIdx + 2] = weightedSumB / totalWeight;
+        output[centerIdx + 3] = data[centerIdx + 3]; // Альфа-канал без изменений
+      }
+    }
+    
+    // Копируем результат обратно
+    data.set(output);
   };
   
   useEffect(() => {
@@ -303,6 +404,11 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           // Применяем гамма-коррекцию для улучшения контраста (особенно в темных условиях)
           if (USE_GAMMA_CORRECTION && GAMMA !== 1.0) {
             applyGammaCorrection(imageData, GAMMA);
+          }
+          
+          // Применяем bilateral blur всегда
+          if (USE_BILATERAL_BLUR) {
+            applyBilateralBlur(imageData, modelWidth, modelHeight, BILATERAL_RADIUS, BILATERAL_SPATIAL_SIGMA, BILATERAL_COLOR_SIGMA);
           }
           
           const rgbData = new Float32Array(3 * modelWidth * modelHeight);
