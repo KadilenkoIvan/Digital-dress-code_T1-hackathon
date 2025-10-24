@@ -46,7 +46,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const BLUR_RADIUS = 0.35; // 0-3: радиус размытия маски (меньше = четче края, но возможны артефакты)
   
   // Параметры bilateral blur для входного изображения
-  const USE_BILATERAL_BLUR = true; // true/false: включить/выключить bilateral blur
+  const USE_BILATERAL_BLUR = false; // true/false: включить/выключить bilateral blur
   const BILATERAL_RADIUS = 2; // 1-5: радиус размытия (больше = сильнее размытие)
   const BILATERAL_SPATIAL_SIGMA = 2.0; // 1.0-5.0: пространственная сигма (влияет на пространственное размытие)
   const BILATERAL_COLOR_SIGMA = 30.0; // 10.0-50.0: цветовая сигма (сохранение краев по цвету)
