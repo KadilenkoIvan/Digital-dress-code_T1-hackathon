@@ -451,23 +451,64 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
 
     const textBlocks = [];
 
-    textBlocks.push({ id: "name", text: employee.full_name, x: 20, y: 20, fontSize: 24, color: "white" });
-    textBlocks.push({ id: "position", text: employee.position, x: 20, y: 60, fontSize: 20, color: "white" });
+    // Функция для расчета "обратного" цвета к фону
+    const getInverseColor = (x, y, width, height) => {
+      const bg = backgroundRef.current;
+      if (!bg) return "white";
+      const data = bg.data;
+      let rSum = 0, gSum = 0, bSum = 0, count = 0;
+
+      for (let dy = 0; dy < height; dy++) {
+        for (let dx = 0; dx < width; dx++) {
+          const px = x + dx;
+          const py = y + dy;
+          if (px >= bg.width || py >= bg.height) continue;
+          const idx = (py * bg.width + px) * 4;
+          rSum += data[idx];
+          gSum += data[idx + 1];
+          bSum += data[idx + 2];
+          count++;
+        }
+      }
+
+      const rAvg = rSum / count;
+      const gAvg = gSum / count;
+      const bAvg = bSum / count;
+
+      // Инвертируем цвета
+      const rInv = 255 - rAvg;
+      const gInv = 255 - gAvg;
+      const bInv = 255 - bAvg;
+
+      return `rgb(${Math.round(rInv)}, ${Math.round(gInv)}, ${Math.round(bInv)})`;
+    };
+
+    // Генерация текста с динамическим цветом
+    const createTextBlock = (id, text, x, y, fontSize) => ({
+      id,
+      text,
+      x,
+      y,
+      fontSize,
+      color: getInverseColor(x, y, 100, fontSize + 10) // берём область под текст ~100px шириной
+    });
+
+    textBlocks.push(createTextBlock("name", employee.full_name, 20, 20, 24));
+    textBlocks.push(createTextBlock("position", employee.position, 20, 60, 20));
 
     if (privacyLevel === "medium" || privacyLevel === "high") {
-      textBlocks.push({ id: "company", text: employee.company, x: 20, y: 100, fontSize: 18, color: "white" });
-      textBlocks.push({ id: "department", text: employee.department, x: 20, y: 140, fontSize: 18, color: "white" });
-      textBlocks.push({ id: "location", text: employee.office_location, x: 20, y: 180, fontSize: 18, color: "white" });
+      textBlocks.push(createTextBlock("company", employee.company, 20, 100, 18));
+      textBlocks.push(createTextBlock("department", employee.department, 20, 140, 18));
+      textBlocks.push(createTextBlock("location", employee.office_location, 20, 180, 18));
     }
 
     if (privacyLevel === "high") {
-      textBlocks.push({ id: "email", text: `Email: ${employee.contact.email}`, x: 20, y: 220, fontSize: 16, color: "white" });
-      textBlocks.push({ id: "telegram", text: `Telegram: ${employee.contact.telegram}`, x: 20, y: 260, fontSize: 16, color: "white" });
+      textBlocks.push(createTextBlock("email", `Email: ${employee.contact.email}`, 20, 220, 16));
+      textBlocks.push(createTextBlock("telegram", `Telegram: ${employee.contact.telegram}`, 20, 260, 16));
     }
 
-    // Сохраняем блок с фоном + текстовые блоки
     setBlocks([bgBlock, ...textBlocks]);
-  }, [blocks[0]?.employee, blocks[0]?.level]);
+  }, [blocks[0]?.employee, blocks[0]?.level, backgroundRef.current]);
 
   const handleUpdate = (id, newProps) => {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...newProps } : b)));
