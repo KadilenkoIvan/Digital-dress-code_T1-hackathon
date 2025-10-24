@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import WebcamWithText from "./WebcamWithText";
+import WebcamWithText from "./WebcamWithText_tf";
 import "./App.css";
 
 function App() {

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
-import * as ort from 'onnxruntime-web/webgpu';
+import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-backend-webgpu';
 import DraggableText from "./DraggableText";
 
 // Global session management to prevent multiple sessions
@@ -25,11 +26,21 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const [backendInfo, setBackendInfo] = useState('Checking...');
   const [usingWebGPU, setUsingWebGPU] = useState(false);
 
-  const MODEL_SCALE = 0.4;
-  const downsampleRatioQuality = 0.6;
+  const MODEL_SCALE = 1 //0.25;
+  const downsampleRatioQuality = 1 // 0.8;
+  const FORCE_WASM = false; // Включаем обратно WebGPU
 
   useEffect(() => {
-    const checkWebGPUSupport = async () => {
+    const checkGPUSupport = async () => {
+      if (FORCE_WASM) {
+        console.log("🔧 FORCE_WASM enabled, using WASM (CPU)");
+        setWebGPUSupported(false);
+        setBackendInfo('WASM (CPU) - FORCED');
+        setUsingWebGPU(false);
+        return false;
+      }
+      
+      // Проверяем WebGPU
       try {
         if (navigator.gpu) {
           const adapter = await navigator.gpu.requestAdapter();
@@ -61,7 +72,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       sessionCreationInProgress = true;
 
       try {
-        const isWebGPUAvaliable = await checkWebGPUSupport();
+        const isWebGPUAvailable = await checkGPUSupport();
         
         // Create temporary canvases
         downsampleCanvasRef.current = document.createElement('canvas');
@@ -88,27 +99,27 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           return;
         }
 
-        // Configure ONNX Runtime
-        if (isWebGPUAvaliable) {
+        // Configure ONNX Runtime для WebGPU
+        if (isWebGPUAvailable) {
           try {
             const adapter = await navigator.gpu.requestAdapter();
             const device = await adapter.requestDevice();
             ort.env.webgpu.device = device;
+            // Важно: указываем что рекуррентные состояния должны оставаться в GPU
+            ort.env.webgpu.preferredLayout = 'NCHW';
+            console.log("🔧 WebGPU device configured");
           } catch (error) {
             console.warn("Failed to initialize WebGPU device:", error);
             setWebGPUSupported(false);
             setBackendInfo('WASM (Fallback)');
             setUsingWebGPU(false);
           }
-        } else {
-          ort.env.wasm.numThreads = 1;
-          ort.env.wasm.simd = true;
         }
 
         // Load ONNX model with proper error handling
         console.log("🔄 Loading model...");
-        const executionProviders = isWebGPUAvaliable && ort.env.webgpu.device ? 
-          ['webgpu', 'wasm'] : ['wasm'];
+        const executionProviders = isWebGPUAvailable && ort.env.webgpu.device ? 
+          [{ name: 'webgpu', preferredLayout: 'NCHW' }, 'wasm'] : ['wasm'];
 
         try {
           const sess = await ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
@@ -145,7 +156,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         } catch (modelError) {
           console.error("❌ Model loading failed:", modelError);
           
-          if (isWebGPUAvaliable) {
+          if (isWebGPUAvailable) {
             console.log("🔄 Falling back to WASM...");
             const sess = await ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
               executionProviders: ['wasm']
@@ -225,6 +236,15 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               rgbData[modelWidth * modelHeight + i] = imageData.data[i * 4 + 1] / 255.0;
               rgbData[2 * modelWidth * modelHeight + i] = imageData.data[i * 4 + 2] / 255.0;
             }
+            
+            // ДИАГНОСТИКА: проверяем входные данные
+            if (frameCountRef.current % 30 === 0) {
+              console.log("🔍 Canvas ImageData first 40 RGBA values:", Array.from(imageData.data.slice(0, 40)));
+              console.log("🔍 Input tensor first 10 R values:", Array.from(rgbData.slice(0, 10)));
+              console.log("🔍 Input tensor first 10 G values:", Array.from(rgbData.slice(modelWidth * modelHeight, modelWidth * modelHeight + 10)));
+              console.log("🔍 Input tensor first 10 B values:", Array.from(rgbData.slice(2 * modelWidth * modelHeight, 2 * modelWidth * modelHeight + 10)));
+              console.log("🔍 Input tensor length:", rgbData.length, "expected:", 3 * modelWidth * modelHeight);
+            }
 
             // Create input tensor
             const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, modelHeight, modelWidth]);
@@ -245,14 +265,52 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             const results = await session.run(feeds);
             const modelInferenceTime = performance.now() - modelStartTime;
             
-            // Extract results
-            const phaSmall = results.pha.data;
+            // Extract results - правильно для WebGPU (асинхронное чтение с GPU)
+            const phaTensor = results.pha;
+            const phaShape = phaTensor.dims; // [1, 1, height, width]
+            const actualMaskHeight = phaShape[2];
+            const actualMaskWidth = phaShape[3];
             
-            // Update recurrent states
+            // ДИАГНОСТИКА: выводим что приходит от модели
+            if (frameCountRef.current % 30 === 0) { // Каждые 30 кадров
+              console.log("📊 Model output dims:", phaShape);
+              console.log("📊 Input was:", modelWidth, "x", modelHeight);
+              console.log("📊 Actual mask:", actualMaskWidth, "x", actualMaskHeight);
+            }
+            
+            // Получаем данные маски (асинхронно для WebGPU)
+            const phaSmall = await phaTensor.getData();
+            
+            // ДИАГНОСТИКА: проверяем статистику маски
+            if (frameCountRef.current % 30 === 0) {
+              console.log("📊 Mask data length:", phaSmall.length);
+              console.log("📊 Expected length:", actualMaskWidth * actualMaskHeight);
+              // Проверяем статистику: мин, макс, среднее
+              let min = phaSmall[0], max = phaSmall[0], sum = 0, nonZeroCount = 0;
+              for (let i = 0; i < phaSmall.length; i++) {
+                if (phaSmall[i] < min) min = phaSmall[i];
+                if (phaSmall[i] > max) max = phaSmall[i];
+                sum += phaSmall[i];
+                if (phaSmall[i] > 0.5) nonZeroCount++;
+              }
+              const avg = sum / phaSmall.length;
+              console.log("📊 Mask stats - Min:", min, "Max:", max, "Avg:", avg, "Pixels > 0.5:", nonZeroCount);
+              // Проверяем центр маски (там должен быть объект)
+              const centerIdx = Math.floor(actualMaskHeight / 2) * actualMaskWidth + Math.floor(actualMaskWidth / 2);
+              console.log("📊 Center pixel value:", phaSmall[centerIdx], "at index:", centerIdx);
+            }
+            
+            // Update recurrent states - используем напрямую (тензоры остаются в GPU памяти)
             if (results.r1o) recRef.current[0] = results.r1o;
             if (results.r2o) recRef.current[1] = results.r2o;
             if (results.r3o) recRef.current[2] = results.r3o;
             if (results.r4o) recRef.current[3] = results.r4o;
+            
+            // ДИАГНОСТИКА: проверяем размеры рекуррентных состояний
+            if (frameCountRef.current % 30 === 0) {
+              console.log("🔄 Recurrent states dims:", 
+                recRef.current.map((r, i) => `r${i+1}: [${r.dims.join(',')}]`).join(', '));
+            }
 
             // Get original video frame without drawing to main canvas
             const originalVideoCanvas = originalVideoCanvasRef.current;
@@ -262,15 +320,15 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             originalVideoCtx.drawImage(video, 0, 0, origWidth, origHeight);
             const originalImageData = originalVideoCtx.getImageData(0, 0, origWidth, origHeight);
             
-            // Process mask
+            // Process mask - используем реальные размеры от модели
             const maskCanvas = maskCanvasRef.current;
-            maskCanvas.width = modelWidth;
-            maskCanvas.height = modelHeight;
+            maskCanvas.width = actualMaskWidth;
+            maskCanvas.height = actualMaskHeight;
             const maskCtx = maskCanvas.getContext('2d');
-            const maskImageData = maskCtx.createImageData(modelWidth, modelHeight);
+            const maskImageData = maskCtx.createImageData(actualMaskWidth, actualMaskHeight);
             
-            // Fill mask (grayscale)
-            for (let i = 0; i < modelWidth * modelHeight; i++) {
+            // Fill mask (grayscale) - используем реальные размеры
+            for (let i = 0; i < actualMaskWidth * actualMaskHeight; i++) {
               const alpha = Math.min(1, Math.max(0, phaSmall[i]));
               const alphaVal = alpha * 255;
               maskImageData.data[i * 4] = alphaVal;
@@ -336,7 +394,6 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               });
             }
 
-            console.log(`🔄 Frame processed: ${fps.toFixed(1)} FPS, model: ${modelInferenceTime.toFixed(1)}ms`);
           } catch (error) {
             console.error("❌ Model inference error:", error);
             // Fallback: just draw the video
