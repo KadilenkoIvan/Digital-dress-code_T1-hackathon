@@ -37,7 +37,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   //modelScale = 0.2, downsampleRatio = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
   
   // Параметры предобработки входного изображения
-  const USE_GAMMA_CORRECTION = true; // true/false: коррекция яркости для улучшения контраста
+  const USE_GAMMA_CORRECTION = false; // true/false: коррекция яркости для улучшения контраста
   const GAMMA = 1; // 1.0-1.3: гамма-коррекция (>1 = осветление темных областей, улучшает сегментацию)
   
   // Параметры постобработки маски
@@ -253,6 +253,13 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     };
   updateBackground();
 }, [backgroundImage, backgroundBlur]);
+
+  // Сброс lastEmployeeRef при изменении фона
+  useEffect(() => {
+    // Сбрасываем lastEmployeeRef, чтобы текстовые блоки могли быть пересозданы
+    lastEmployeeRef.current = null;
+    console.log("🔄 Background changed, lastEmployeeRef reset");
+  }, [backgroundImage]);
 
   useEffect(() => {
     let animationId;
@@ -741,6 +748,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             onSelect={handleTextSelect}
             onUpdate={handleUpdate}
             parentRef={containerRef}
+            backgroundLayerRef={backgroundLayerRef}
           />
         );
       })}
