@@ -148,6 +148,37 @@ body {
   background: #1e3c72;
 }
 
+/* Контейнер для file input с кнопкой удаления */
+.file-input-with-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.remove-btn {
+  padding: 0.6rem 1rem;
+  border: none;
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  color: white;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
+}
+
+.remove-btn:hover {
+  background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+.remove-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(220, 53, 69, 0.2);
+}
+
 .add-text-btn {
   width: 100%;
   padding: 0.8rem 1.5rem;
@@ -350,6 +381,92 @@ body {
   background: #1e3c72;
   transform: scale(1.1);
   box-shadow: 0 4px 12px rgba(42, 82, 152, 0.5);
+}
+
+/* Стили для тумблера режима отображения */
+.toggle-switch {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.toggle-switch input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-switch .toggle-slider {
+  display: flex !important;
+  flex-direction: row !important;
+  position: relative;
+  width: 100%;
+  height: 45px;
+  background: #fff;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.1);
+  border: 2px solid #e0e0e0;
+  overflow: hidden;
+}
+
+.toggle-option {
+  flex: 1;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  z-index: 2;
+  position: relative;
+  white-space: nowrap;
+}
+
+.toggle-processed {
+  color: #2a5298;
+}
+
+.toggle-raw {
+  color: #666;
+}
+
+/* Эффект слайдера */
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%);
+  border-radius: 25px;
+  transition: transform 0.3s ease;
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(42, 82, 152, 0.3);
+}
+
+/* Когда чекбокс не отмечен (обработанное видео) */
+.toggle-switch input[type="checkbox"]:not(:checked) ~ .toggle-slider::before {
+  transform: translateX(0);
+}
+
+/* Когда чекбокс отмечен (сырое видео) */
+.toggle-switch input[type="checkbox"]:checked ~ .toggle-slider::before {
+  transform: translateX(100%);
+}
+
+/* Цвета текста в зависимости от состояния */
+.toggle-switch input[type="checkbox"]:not(:checked) ~ .toggle-slider .toggle-processed {
+  color: white;
+}
+
+.toggle-switch input[type="checkbox"]:checked ~ .toggle-slider .toggle-raw {
+  color: white;
+}
+
+.toggle-slider:hover {
+  border-color: #2a5298;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.15), 0 0 10px rgba(42, 82, 152, 0.2);
 }
 
 @media (max-width: 1920px) {

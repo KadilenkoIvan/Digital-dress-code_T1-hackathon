@@ -6,7 +6,7 @@ import TextEditorPanel from "./TextEditorPanel";
 import ImageEditorPanel from "./ImageEditorPanel";
 import "./TextEditorPanel.css";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8 }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8, rawMode = false }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -24,6 +24,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const lastEmployeeRef = useRef(null); // Последний обработанный employee для предотвращения дублирования
   const textClickedRef = useRef(false); // Флаг для отслеживания кликов по тексту
   const backgroundLayerRef = useRef(null); // Ref для фонового слоя
+  const blurredBgCanvasRef = useRef(null); // Canvas для размытого реального фона
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
@@ -362,6 +363,25 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     console.log("🔄 Background changed, lastEmployeeRef reset");
   }, [backgroundImage]);
 
+  // Управление canvas реального видео при загрузке/удалении фона
+  useEffect(() => {
+    if (!backgroundLayerRef.current) return;
+    
+    if (backgroundImage) {
+      // Если загружен фон, удаляем canvas реального видео
+      if (blurredBgCanvasRef.current && blurredBgCanvasRef.current.parentNode) {
+        backgroundLayerRef.current.removeChild(blurredBgCanvasRef.current);
+        blurredBgCanvasRef.current = null;
+        console.log("🗑️ Real video background canvas removed (background loaded)");
+      }
+      // Устанавливаем загруженное изображение
+      backgroundLayerRef.current.style.backgroundImage = `url(${backgroundImage})`;
+    } else {
+      // Если фон удален, убираем CSS фон (canvas создастся автоматически в drawFrame)
+      backgroundLayerRef.current.style.backgroundImage = 'none';
+    }
+  }, [backgroundImage]);
+
   useEffect(() => {
     let animationId;
 
@@ -379,6 +399,29 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+
+        // Если включен режим "Сырое видео", просто выводим камеру без обработки
+        if (rawMode) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Обновляем статистику (throttled - раз в 100ms, как в обработанном режиме)
+          const now = performance.now();
+          if (onStatsUpdate && (now - lastStatsUpdateRef.current) > 100) {
+            lastStatsUpdateRef.current = now;
+            onStatsUpdate({
+              fps: null,
+              avgFps: null,
+              modelTime: null,
+              fullFrameTime: null,
+              modelActive: false,
+              backend: 'RAW MODE'
+            });
+          }
+          
+          animationId = requestAnimationFrame(drawFrame);
+          return;
+        }
 
         if (session && recRef.current.length > 0) {
           const startTime = performance.now();
@@ -535,6 +578,48 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             fullMaskCtx.drawImage(maskCanvas, 0, 0, origWidth, origHeight);
             const fullMaskData = fullMaskCtx.getImageData(0, 0, origWidth, origHeight);
 
+            // Если фон не загружен - используем реальное видео в качестве фона (с размытием или без)
+            if (!backgroundImage) {
+              if (!blurredBgCanvasRef.current) {
+                blurredBgCanvasRef.current = document.createElement('canvas');
+                blurredBgCanvasRef.current.style.position = 'absolute';
+                blurredBgCanvasRef.current.style.top = '0';
+                blurredBgCanvasRef.current.style.left = '0';
+                blurredBgCanvasRef.current.style.width = '100%';
+                blurredBgCanvasRef.current.style.height = '100%';
+                blurredBgCanvasRef.current.style.objectFit = 'cover';
+                
+                // Вставляем canvas в фоновый слой
+                if (backgroundLayerRef.current) {
+                  // Убираем CSS фон
+                  backgroundLayerRef.current.style.backgroundImage = 'none';
+                  // Добавляем canvas
+                  backgroundLayerRef.current.appendChild(blurredBgCanvasRef.current);
+                  console.log("🎥 Real video background canvas created");
+                }
+              }
+              
+              const blurredBgCanvas = blurredBgCanvasRef.current;
+              
+              // Устанавливаем размеры только если они изменились (чтобы не сбрасывать контекст)
+              if (blurredBgCanvas.width !== origWidth || blurredBgCanvas.height !== origHeight) {
+                blurredBgCanvas.width = origWidth;
+                blurredBgCanvas.height = origHeight;
+              }
+              
+              const blurredBgCtx = blurredBgCanvas.getContext('2d');
+              
+              // Очищаем canvas перед рисованием нового кадра
+              blurredBgCtx.clearRect(0, 0, origWidth, origHeight);
+              
+              // Рисуем оригинальное видео с размытием (если backgroundBlur > 0) или без
+              if (backgroundBlur > 0) {
+                blurredBgCtx.filter = `blur(${backgroundBlur}px)`;
+              }
+              blurredBgCtx.drawImage(video, 0, 0, origWidth, origHeight);
+              blurredBgCtx.filter = 'none';
+            }
+
             // Композитинг: выводим только человека с прозрачным фоном
             // Canvas будет прозрачным, чтобы через него было видно текст и фон
             const outputData = new Uint8ClampedArray(origWidth * origHeight * 4);
@@ -621,7 +706,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         cancelAnimationFrame(animationId);
       }
     };
-  }, [session, modelScale, downsampleRatio]);
+  }, [session, modelScale, downsampleRatio, rawMode, backgroundImage, backgroundBlur]);
 
   // Сброс рекуррентных состояний при изменении modelScale или downsampleRatio
   useEffect(() => {
@@ -636,6 +721,38 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       console.log("🔄 Recurrent states reset due to parameter change. modelScale:", modelScale, "downsampleRatio:", downsampleRatio);
     }
   }, [modelScale, downsampleRatio]);
+
+  // Сброс счетчиков статистики при переключении режимов или изменении параметров
+  useEffect(() => {
+    frameCountRef.current = 0;
+    totalTimeRef.current = 0;
+    lastStatsUpdateRef.current = 0;
+    console.log("📊 Stats counters reset. rawMode:", rawMode);
+    
+    // Явное обновление статистики при переключении режима
+    if (onStatsUpdate) {
+      if (rawMode) {
+        onStatsUpdate({
+          fps: null,
+          avgFps: null,
+          modelTime: null,
+          fullFrameTime: null,
+          modelActive: false,
+          backend: 'RAW MODE'
+        });
+      } else {
+        onStatsUpdate({
+          fps: null,
+          avgFps: null,
+          modelTime: null,
+          fullFrameTime: null,
+          modelActive: false,
+          backend: backendNameRef.current
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawMode, modelScale, downsampleRatio]);
 
   // Мемоизируем блок "b1" и его ключевые свойства для оптимизации
   const bgBlockData = useMemo(() => {
@@ -807,7 +924,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         style={{ display: "none" }}
       />
       
-      {/* Слой 1: Фоновое изображение */}
+      {/* Слой 1: Фоновое изображение или реальное видео */}
       <div
         ref={backgroundLayerRef}
         style={{
@@ -816,10 +933,12 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           left: 0,
           width: "100%",
           height: "100%",
-          backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+          // Если есть загруженный фон - используем его, иначе реальное видео (через canvas)
+          backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none',
           backgroundSize: "cover",
           backgroundPosition: "center",
-          filter: backgroundBlur > 0 ? `blur(${backgroundBlur}px)` : 'none',
+          // Размытие применяется только к загруженному фону через CSS
+          filter: (backgroundImage && backgroundBlur > 0) ? `blur(${backgroundBlur}px)` : 'none',
           zIndex: 0
         }}
       />
@@ -859,7 +978,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         );
       })}
 
-      {/* Слой 3: Canvas с веб-камерой (прозрачный фон) */}
+      {/* Слой 3: Canvas с веб-камерой (прозрачный фон в обычном режиме) */}
       <canvas
         ref={canvasRef}
         style={{ 
@@ -869,7 +988,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           width: "100%", 
           height: "100%", 
           zIndex: 2,
-          pointerEvents: "none" // Чтобы клики проходили через canvas к тексту
+          pointerEvents: rawMode ? "auto" : "none" // В rawMode разрешаем клики, в обработанном - пропускаем к тексту
         }}
       />
 

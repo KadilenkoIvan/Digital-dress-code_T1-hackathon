@@ -1,13 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import WebcamWithText from "./WebcamWithText";
 import "./App.css";
 
 function App() {
   const [blocks, setBlocks] = useState([]);
   const [selectedBlockId, setSelectedBlockId] = useState(null);
-  const [backgroundBlur, setBackgroundBlur] = useState(0); // Размытие фона (0-50)
+  const [backgroundBlur, setBackgroundBlur] = useState(10); // Размытие фона (0-50)
   const [modelScale, setModelScale] = useState(0.2); // Масштаб модели (0.0-1.0)
   const [downsampleRatio, setDownsampleRatio] = useState(0.8); // Downsample ratio (0.5-0.9)
+  const [rawMode, setRawMode] = useState(false); // Режим вывода: false = обработанное, true = сырое видео
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
@@ -16,6 +17,10 @@ function App() {
     modelActive: false,
     backend: 'Loading...'
   });
+  
+  // Refs для сброса file inputs
+  const backgroundInputRef = useRef(null);
+  const jsonInputRef = useRef(null);
 
   const currentLevel = blocks[0]?.level || "low";
 
@@ -36,6 +41,22 @@ function App() {
         }
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveBackground = () => {
+    setBlocks(prev => {
+      if (prev.length === 0) return prev;
+      const bgBlock = prev[0];
+      if (bgBlock.id === "b1") {
+        const { image, ...rest } = bgBlock;
+        return [rest, ...prev.slice(1)];
+      }
+      return prev;
+    });
+    // Сбрасываем input чтобы можно было загрузить тот же файл снова
+    if (backgroundInputRef.current) {
+      backgroundInputRef.current.value = '';
     }
   };
 
@@ -65,6 +86,24 @@ function App() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleRemoveEmployee = () => {
+    // Удаляем все текстовые блоки, созданные из JSON, и информацию о сотруднике
+    setBlocks(prev => {
+      if (prev.length === 0) return prev;
+      const bgBlock = prev[0];
+      if (bgBlock.id === "b1") {
+        const { employee, ...rest } = bgBlock;
+        // Оставляем только блок метаданных (без employee) и пользовательские блоки (не из JSON)
+        return [rest];
+      }
+      return prev;
+    });
+    // Сбрасываем input чтобы можно было загрузить тот же файл снова
+    if (jsonInputRef.current) {
+      jsonInputRef.current.value = '';
+    }
   };
 
   const handleAddTextBlock = () => {
@@ -134,7 +173,7 @@ function App() {
           <span className="stat-value">{stats.modelTime !== null ? `${stats.modelTime} ms` : 'None'}</span>
         </div>
         <div className="stat-item">
-          <span className="stat-label">Время кадра (полное):</span>
+          <span className="stat-label">Время кадра:</span>
           <span className="stat-value">{stats.fullFrameTime !== null ? `${stats.fullFrameTime} ms` : 'None'}</span>
         </div>
         <div className="stat-item">
@@ -160,11 +199,32 @@ function App() {
           backgroundBlur={backgroundBlur}
           modelScale={modelScale}
           downsampleRatio={downsampleRatio}
+          rawMode={rawMode}
         />
       </div>
 
       <div className="settings-panel">
         <h3>Настройки</h3>
+        
+        {/* Тумблер режима вывода */}
+        <div className="setting-group">
+          <label>
+            Режим отображения:
+            <div className="toggle-switch">
+              <input 
+                type="checkbox" 
+                id="raw-mode-toggle"
+                checked={rawMode}
+                onChange={(e) => setRawMode(e.target.checked)}
+              />
+              <label htmlFor="raw-mode-toggle" className="toggle-slider">
+                <span className="toggle-option toggle-processed"> Обработанное</span>
+                <span className="toggle-option toggle-raw"> Сырое видео</span>
+              </label>
+            </div>
+          </label>
+        </div>
+
         <div className="setting-group">
           <label>
             Масштаб модели (качество): {modelScale.toFixed(2)}
@@ -211,7 +271,23 @@ function App() {
         <div className="setting-group">
           <label>
             Задний фон:
-            <input type="file" accept="image/*" onChange={handleImageChange} />
+            <div className="file-input-with-button">
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleImageChange}
+                ref={backgroundInputRef}
+              />
+              {blocks[0]?.image && (
+                <button 
+                  className="remove-btn"
+                  onClick={handleRemoveBackground}
+                  title="Удалить фон"
+                >
+                  🗑️ Удалить
+                </button>
+              )}
+            </div>
           </label>
         </div>
         <div className="setting-group">
@@ -231,7 +307,23 @@ function App() {
         <div className="setting-group">
           <label>
             Информация о сотруднике:
-            <input type="file" accept=".json" onChange={handleJsonUpload} />
+            <div className="file-input-with-button">
+              <input 
+                type="file" 
+                accept=".json" 
+                onChange={handleJsonUpload}
+                ref={jsonInputRef}
+              />
+              {blocks[0]?.employee && (
+                <button 
+                  className="remove-btn"
+                  onClick={handleRemoveEmployee}
+                  title="Удалить информацию о сотруднике"
+                >
+                  🗑️ Удалить
+                </button>
+              )}
+            </div>
           </label>
         </div>
         <div className="setting-group">
