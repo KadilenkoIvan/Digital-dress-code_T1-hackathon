@@ -7,6 +7,7 @@ function App() {
   const [selectedBlockId, setSelectedBlockId] = useState(null);
   const [backgroundBlur, setBackgroundBlur] = useState(0); // Размытие фона (0-50)
   const [modelScale, setModelScale] = useState(0.2); // Масштаб модели (0.0-1.0)
+  const [downsampleRatio, setDownsampleRatio] = useState(0.8); // Downsample ratio (0.5-0.9)
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
@@ -158,6 +159,7 @@ function App() {
           backgroundImage={blocks[0]?.image || null}
           backgroundBlur={backgroundBlur}
           modelScale={modelScale}
+          downsampleRatio={downsampleRatio}
         />
       </div>
 
@@ -176,6 +178,21 @@ function App() {
               className="model-scale-slider"
             />
             <span className="slider-hint">Меньше = быстрее, но ниже качество</span>
+          </label>
+        </div>
+        <div className="setting-group">
+          <label>
+            Downsample Ratio: {downsampleRatio.toFixed(2)}
+            <input 
+              type="range" 
+              min="0.5" 
+              max="1.0" 
+              step="0.05"
+              value={downsampleRatio} 
+              onChange={(e) => setDownsampleRatio(parseFloat(e.target.value))}
+              className="downsample-slider"
+            />
+            <span className="slider-hint">Меньше = быстрее, больше = лучше качество краёв</span>
           </label>
         </div>
         <div className="setting-group">
