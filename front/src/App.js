@@ -9,7 +9,8 @@ function App() {
     avgFps: null,
     modelTime: null,
     fullFrameTime: null,
-    modelActive: false
+    modelActive: false,
+    backend: 'Loading...'
   });
 
   const currentLevel = blocks[0]?.level || "low";
@@ -87,6 +88,10 @@ function App() {
           <span className={`stat-value ${stats.modelActive ? 'active' : 'inactive'}`}>
             {stats.modelActive ? 'Активна' : 'Неактивна'}
           </span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-label">Backend:</span>
+          <span className="stat-value">{stats.backend}</span>
         </div>
       </div>
 

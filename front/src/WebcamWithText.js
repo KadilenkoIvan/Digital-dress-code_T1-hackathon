@@ -15,13 +15,78 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const downsampleCanvasRef = useRef(null); // Canvas для уменьшенного изображения
   const maskCanvasRef = useRef(null); // Canvas для маски уменьшенного размера
   const fullMaskCanvasRef = useRef(null); // Canvas для маски полного размера
+  const backendNameRef = useRef('Loading...'); // Название используемого backend
+  const prevMaskRef = useRef(null); // Предыдущая маска для temporal smoothing
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
   // Рекомендуемые значения: 0.3-0.5
-  const MODEL_SCALE = 0.4;
-  const downsampleRatioQuality = 0.6;
-
+  const MODEL_SCALE = 0.3; // 0.2-0.5: меньше = быстрее работа, но ниже качество (0.25 = хороший баланс)
+  const downsampleRatioQuality = 0.75; // 0.5-0.9: меньше = быстрее работа, но ниже качество (0.8 = хороший баланс)
+  //MODEL_SCALE = 0.35, downsampleRatioQuality = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
+  //MODEL_SCALE = 0.25, downsampleRatioQuality = 0.8 = нормкальное качество (съедает наушники), 30-35мс модели и 45-55мс на кадр
+  
+  // Параметры постобработки маски
+  const TEMPORAL_SMOOTHING = 0.95; // 0.5-0.95: больше = быстрее реакция (меньше шлейф), но больше мерцания (0.95 = хороший баланс)
+  const BLUR_RADIUS = 0.35; // 0-3: радиус размытия маски (меньше = четче края, но возможны артефакты) (0.35 = хороший баланс)
+  
+  // Морфологические операции (Opening + Closing)
+  const USE_MORPHOLOGY = false; // true/false: включить/выключить морфологические операции
+  const MORPH_RADIUS = 1; // 1-2: радиус для erosion/dilation (больше = сильнее эффект, но медленнее)
+  
+  // Функция Erosion (сужение маски, убирает шум)
+  const applyErosion = (imageData, width, height, radius) => {
+    const data = imageData.data;
+    const output = new Uint8ClampedArray(data.length);
+    output.set(data); // Копируем исходные данные
+    
+    for (let y = radius; y < height - radius; y++) {
+      for (let x = radius; x < width - radius; x++) {
+        let minVal = 255;
+        
+        // Проверяем окрестность
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const idx = ((y + dy) * width + (x + dx)) * 4;
+            minVal = Math.min(minVal, data[idx]); // Берем минимум (grayscale, все каналы одинаковы)
+          }
+        }
+        
+        const idx = (y * width + x) * 4;
+        output[idx] = output[idx + 1] = output[idx + 2] = minVal;
+      }
+    }
+    
+    // Копируем результат обратно
+    data.set(output);
+  };
+  
+  // Функция Dilation (расширение маски, заполняет дыры)
+  const applyDilation = (imageData, width, height, radius) => {
+    const data = imageData.data;
+    const output = new Uint8ClampedArray(data.length);
+    output.set(data);
+    
+    for (let y = radius; y < height - radius; y++) {
+      for (let x = radius; x < width - radius; x++) {
+        let maxVal = 0;
+        
+        // Проверяем окрестность
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const idx = ((y + dy) * width + (x + dx)) * 4;
+            maxVal = Math.max(maxVal, data[idx]); // Берем максимум
+          }
+        }
+        
+        const idx = (y * width + x) * 4;
+        output[idx] = output[idx + 1] = output[idx + 2] = maxVal;
+      }
+    }
+    
+    data.set(output);
+  };
+  
   useEffect(() => {
     // Создаём временные canvas для обработки (переиспользуем на каждом кадре)
     downsampleCanvasRef.current = document.createElement('canvas');
@@ -39,27 +104,53 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       })
       .catch(console.error);
 
-    // Настройка ONNX Runtime - простая конфигурация без многопоточности
-    ort.env.wasm.numThreads = 1;  // Однопоточность (не требует crossOriginIsolation)
-    ort.env.wasm.simd = true;     // SIMD для ускорения
+    // Настройка ONNX Runtime - ПРОСТАЯ СТАБИЛЬНАЯ ВЕРСИЯ
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.simd = true;
     
-    // Загрузка ONNX модели
-    console.log("🔄 Loading model...");
+    // Загрузка модели - только WASM для стабильности
+    console.log("🔄 Loading model with WASM...");
     ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
-      executionProviders: ['webgl', 'wasm']  // Стабильный WASM backend
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all',
     }).then((sess) => {
-      console.log("✅ Model loaded successfully!");
-      console.log("🎮 Backend:", "WASM (CPU with SIMD)");
-      console.log("📊 Input names:", sess.inputNames);
+      console.log("✅ Model loaded!");
+      backendNameRef.current = 'WASM (CPU)';
+      
+      if (onStatsUpdate) {
+        onStatsUpdate({
+          fps: null,
+          avgFps: null,
+          modelTime: null,
+          fullFrameTime: null,
+          modelActive: false,
+          backend: 'WASM (CPU)'
+        });
+      }
+      
       setSession(sess);
-      // Инициализация recurrent states - используем float32
+      
       recRef.current = [
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
         new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1])
       ];
-    }).catch(console.error);
+    }).catch((error) => {
+      console.error("❌ Error loading model:", error);
+    });
+
+    // Создание фона
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = 1280;
+    bgCanvas.height = 960;
+    const bgCtx = bgCanvas.getContext('2d');
+    const gradient = bgCtx.createLinearGradient(0, 0, 1280, 960);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(1, '#16213e');
+    bgCtx.fillStyle = gradient;
+    bgCtx.fillRect(0, 0, 1280, 960);
+    backgroundRef.current = bgCtx.getImageData(0, 0, 1280, 960);
   }, []);
 
   // Создание фона
@@ -202,7 +293,17 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             const maskCtx = maskCanvas.getContext('2d');
             const maskImageData = maskCtx.createImageData(modelWidth, modelHeight);
             
-            // Заполняем уменьшенную маску (grayscale)
+            // 1. Temporal Smoothing (EMA) - сглаживание между кадрами
+            const prevMask = prevMaskRef.current;
+            if (prevMask && prevMask.length === phaSmall.length) {
+              for (let i = 0; i < phaSmall.length; i++) {
+                phaSmall[i] = phaSmall[i] * TEMPORAL_SMOOTHING + prevMask[i] * (1 - TEMPORAL_SMOOTHING);
+              }
+            }
+            // Сохраняем текущую маску для следующего кадра
+            prevMaskRef.current = new Float32Array(phaSmall);
+            
+            // 2. Заполняем уменьшенную маску (grayscale)
             for (let i = 0; i < modelWidth * modelHeight; i++) {
               const alpha = Math.min(1, Math.max(0, phaSmall[i]));
               const alphaVal = alpha * 255;
@@ -214,11 +315,38 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             
             maskCtx.putImageData(maskImageData, 0, 0);
             
-            // Масштабируем маску до оригинального размера
+            // 3. Применяем морфологические операции (Opening + Closing)
+            if (USE_MORPHOLOGY && MORPH_RADIUS > 0) {
+              const morphImageData = maskCtx.getImageData(0, 0, modelWidth, modelHeight);
+              
+              // Opening: Erosion → Dilation (убирает шум на фоне)
+              applyErosion(morphImageData, modelWidth, modelHeight, MORPH_RADIUS);
+              applyDilation(morphImageData, modelWidth, modelHeight, MORPH_RADIUS);
+              
+              // Closing: Dilation → Erosion (заполняет дыры внутри объекта)
+              applyDilation(morphImageData, modelWidth, modelHeight, MORPH_RADIUS);
+              applyErosion(morphImageData, modelWidth, modelHeight, MORPH_RADIUS);
+              
+              maskCtx.putImageData(morphImageData, 0, 0);
+            }
+            
+            // 4. Применяем blur на маленькой маске (быстрее чем на большой)
+            if (BLUR_RADIUS > 0) {
+              maskCtx.filter = `blur(${BLUR_RADIUS}px)`;
+              maskCtx.drawImage(maskCanvas, 0, 0);
+              maskCtx.filter = 'none';
+            }
+            
+            // 5. Масштабируем маску до оригинального размера с билинейной интерполяцией
             const fullMaskCanvas = fullMaskCanvasRef.current;
             fullMaskCanvas.width = origWidth;
             fullMaskCanvas.height = origHeight;
             const fullMaskCtx = fullMaskCanvas.getContext('2d');
+            
+            // Включаем билинейную интерполяцию для плавных краев
+            fullMaskCtx.imageSmoothingEnabled = true;
+            fullMaskCtx.imageSmoothingQuality = 'high';
+            
             fullMaskCtx.drawImage(maskCanvas, 0, 0, origWidth, origHeight);
             const fullMaskData = fullMaskCtx.getImageData(0, 0, origWidth, origHeight);
 
@@ -265,7 +393,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
                 avgFps: avgFps.toFixed(2),
                 modelTime: modelInferenceTime.toFixed(2), // Время только модели
                 fullFrameTime: frameTime.toFixed(2), // Полное время обработки кадра
-                modelActive: true
+                modelActive: true,
+                backend: backendNameRef.current
               });
             }
           } catch (error) {
@@ -279,7 +408,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
                 avgFps: null,
                 modelTime: null,
                 fullFrameTime: null,
-                modelActive: false
+                modelActive: false,
+                backend: backendNameRef.current
               });
             }
           }
@@ -293,7 +423,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               avgFps: null,
               modelTime: null,
               fullFrameTime: null,
-              modelActive: false
+              modelActive: false,
+              backend: backendNameRef.current
             });
           }
         }
