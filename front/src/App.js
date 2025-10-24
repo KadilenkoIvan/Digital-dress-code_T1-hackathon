@@ -5,6 +5,8 @@ import "./App.css";
 function App() {
   const [blocks, setBlocks] = useState([]);
   const [selectedBlockId, setSelectedBlockId] = useState(null);
+  const [backgroundBlur, setBackgroundBlur] = useState(0); // Размытие фона (0-50)
+  const [modelScale, setModelScale] = useState(0.2); // Масштаб модели (0.0-1.0)
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
@@ -50,7 +52,7 @@ function App() {
         }
 
         setBlocks(prev => {
-          const bgBlock = prev.find(b => b.id === "b1") || { id: "b1" };
+          const bgBlock = prev.find(b => b.id === "b1") || { id: "b1", type: "metadata" };
           return [{
             ...bgBlock,
             employee: json.employee,
@@ -68,6 +70,7 @@ function App() {
     const newId = `text_${Date.now()}`;
     const newBlock = {
       id: newId,
+      type: 'text', // Явно указываем тип
       text: "Новый текст",
       x: 50,
       y: 300,
@@ -79,6 +82,38 @@ function App() {
     };
     setBlocks(prev => [...prev, newBlock]);
     setSelectedBlockId(newId);
+  };
+
+  const handleAddImageBlock = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Проверяем тип файла
+    if (!file.type.startsWith('image/')) {
+      alert('Пожалуйста, выберите изображение!');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const newId = `image_${Date.now()}`;
+      const newBlock = {
+        id: newId,
+        type: 'image',
+        imageSrc: reader.result,
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 200,
+        objectFit: 'contain'
+      };
+      setBlocks(prev => [...prev, newBlock]);
+      setSelectedBlockId(newId);
+    };
+    reader.readAsDataURL(file);
+    
+    // Сбрасываем input чтобы можно было загрузить тот же файл снова
+    e.target.value = '';
   };
 
   return (
@@ -121,11 +156,28 @@ function App() {
           setSelectedBlockId={setSelectedBlockId}
           onStatsUpdate={setStats}
           backgroundImage={blocks[0]?.image || null}
+          backgroundBlur={backgroundBlur}
+          modelScale={modelScale}
         />
       </div>
 
       <div className="settings-panel">
         <h3>Настройки</h3>
+        <div className="setting-group">
+          <label>
+            Масштаб модели (качество): {modelScale.toFixed(2)}
+            <input 
+              type="range" 
+              min="0.1" 
+              max="1.0" 
+              step="0.05"
+              value={modelScale} 
+              onChange={(e) => setModelScale(parseFloat(e.target.value))}
+              className="model-scale-slider"
+            />
+            <span className="slider-hint">Меньше = быстрее, но ниже качество</span>
+          </label>
+        </div>
         <div className="setting-group">
           <label>
             Уровень отображения персональных данных:
@@ -141,8 +193,22 @@ function App() {
         </div>
         <div className="setting-group">
           <label>
-            Изображение:
+            Задний фон:
             <input type="file" accept="image/*" onChange={handleImageChange} />
+          </label>
+        </div>
+        <div className="setting-group">
+          <label>
+            Размытие фона: {backgroundBlur}px
+            <input 
+              type="range" 
+              min="0" 
+              max="50" 
+              step="1"
+              value={backgroundBlur} 
+              onChange={(e) => setBackgroundBlur(parseFloat(e.target.value))}
+              className="blur-slider"
+            />
           </label>
         </div>
         <div className="setting-group">
@@ -158,6 +224,17 @@ function App() {
           >
             ➕ Добавить текст
           </button>
+        </div>
+        <div className="setting-group">
+          <label className="add-image-label">
+            🖼️ Добавить картинку
+            <input 
+              type="file" 
+              accept="image/*" 
+              onChange={handleAddImageBlock}
+              style={{ display: 'none' }}
+            />
+          </label>
         </div>
       </div>
     </div>

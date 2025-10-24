@@ -1,10 +1,12 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
 import * as ort from "onnxruntime-web";
 import DraggableText from "./DraggableText";
+import DraggableImage from "./DraggableImage";
 import TextEditorPanel from "./TextEditorPanel";
+import ImageEditorPanel from "./ImageEditorPanel";
 import "./TextEditorPanel.css";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -25,18 +27,19 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
-  // Рекомендуемые значения: 0.3-0.5
-  const MODEL_SCALE = 0.2; // 0.2-0.5: меньше = быстрее работа, но ниже качество (0.25 = хороший баланс)
+  // Рекомендуемые значения: 0.1-1.0 (управляется через UI)
+  // modelScale передается как пропс из App.js
   const downsampleRatioQuality = 0.8; // 0.5-0.9: меньше = быстрее работа, но ниже качество (0.8 = хороший баланс)
-  //MODEL_SCALE = 0.35, downsampleRatioQuality = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
-  //MODEL_SCALE = 0.25, downsampleRatioQuality = 0.8 = нормкальное качество (съедает наушники), 30-35мс модели и 45-55мс на кад
-  //MODEL_SCALE = 0.2, downsampleRatioQuality = 0.7 = так себе качество (съедает руки), 20-25мс модели и 30-35мс на кадр
-  //MODEL_SCALE = 0.3, downsampleRatioQuality = 0.7 = нормальное качество, 35-40мс модели и 45-50мс на кадр
-  //MODEL_SCALE = 0.2, downsampleRatioQuality = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
+  //Примеры производительности:
+  //modelScale = 0.35, downsampleRatioQuality = 0.7 = хорошее качество, 45-55мс модели и 55-65мс на кадр
+  //modelScale = 0.25, downsampleRatioQuality = 0.8 = нормальное качество (съедает наушники), 30-35мс модели и 45-55мс на кадр
+  //modelScale = 0.2, downsampleRatioQuality = 0.7 = так себе качество (съедает руки), 20-25мс модели и 30-35мс на кадр
+  //modelScale = 0.3, downsampleRatioQuality = 0.7 = нормальное качество, 35-40мс модели и 45-50мс на кадр
+  //modelScale = 0.2, downsampleRatioQuality = 0.8 = нормальное качество, 25мс модели и 35-40мс на кадр
   
   // Параметры предобработки входного изображения
   const USE_GAMMA_CORRECTION = true; // true/false: коррекция яркости для улучшения контраста
-  const GAMMA = 1.5; // 1.0-1.3: гамма-коррекция (>1 = осветление темных областей, улучшает сегментацию)
+  const GAMMA = 1; // 1.0-1.3: гамма-коррекция (>1 = осветление темных областей, улучшает сегментацию)
   
   // Параметры постобработки маски
   const TEMPORAL_SMOOTHING = 0.85; // 0.5-0.95: больше = быстрее реакция (меньше шлейф), но больше мерцания
@@ -46,9 +49,6 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   // Морфологические операции (Opening + Closing) - убирают шум и заполняют дыры
   const USE_MORPHOLOGY = true; // true/false: включить/выключить морфологические операции
   const MORPH_RADIUS = 1; // 1-2: радиус для erosion/dilation (больше = сильнее эффект, но медленнее)
-  
-  // Параметры обработки фона
-  const BACKGROUND_BLUR = 0; // 0-5: радиус размытия фона (px), применяется при загрузке фона
   
   // Функция Erosion (сужение маски, убирает шум)
   const applyErosion = (imageData, width, height, radius) => {
@@ -233,8 +233,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           const offsetY = (canvasH - scaledH) / 2;
 
           // Применяем размытие к фону для скрытия артефактов композитинга
-          if (BACKGROUND_BLUR > 0) {
-            bgCtx.filter = `blur(${BACKGROUND_BLUR}px)`;
+          if (backgroundBlur > 0) {
+            bgCtx.filter = `blur(${backgroundBlur}px)`;
           }
           bgCtx.drawImage(img, offsetX, offsetY, scaledW, scaledH);
           bgCtx.filter = 'none'; // Сбрасываем фильтр
@@ -253,7 +253,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       }
     };
   updateBackground();
-}, [backgroundImage]);
+}, [backgroundImage, backgroundBlur]);
 
   useEffect(() => {
     let animationId;
@@ -280,9 +280,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           const origWidth = canvas.width;
           const origHeight = canvas.height;
           
-          // Уменьшенные размеры для модели
-          const modelWidth = Math.round(origWidth * MODEL_SCALE);
-          const modelHeight = Math.round(origHeight * MODEL_SCALE);
+          // Уменьшенные размеры для модели (используется значение из UI)
+          const modelWidth = Math.round(origWidth * modelScale);
+          const modelHeight = Math.round(origHeight * modelScale);
           
           // Подготавливаем временный canvas для уменьшенного изображения
           const downsampleCanvas = downsampleCanvasRef.current;
@@ -509,7 +509,21 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         cancelAnimationFrame(animationId);
       }
     };
-  }, [session]);
+  }, [session, modelScale]);
+
+  // Сброс рекуррентных состояний при изменении modelScale
+  useEffect(() => {
+    if (recRef.current.length > 0) {
+      // Сбрасываем рекуррентные состояния к начальным значениям
+      recRef.current = [
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1]),
+        new ort.Tensor("float32", new Float32Array(1).fill(0), [1, 1, 1, 1])
+      ];
+      console.log("🔄 Recurrent states reset due to modelScale change:", modelScale);
+    }
+  }, [modelScale]);
 
   // Мемоизируем блок "b1" и его ключевые свойства для оптимизации
   const bgBlockData = useMemo(() => {
@@ -531,7 +545,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     const bgBlock = blocks.find(b => b.id === "b1");
 
     // Проверяем, не обрабатывали ли мы уже этого employee
-    const employeeKey = `${employee.full_name}_${employee.position}_${privacyLevel}`;
+    const logoUrl = employee.branding?.logo_url || '';
+    const employeeKey = `${employee.full_name}_${employee.position}_${privacyLevel}_${logoUrl}`;
     if (lastEmployeeRef.current === employeeKey) {
       return;
     }
@@ -576,6 +591,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
     // Генерация текста с динамическим цветом
     const createTextBlock = (id, text, x, y, fontSize) => ({
       id,
+      type: 'text', // Явно указываем тип
       text,
       x,
       y,
@@ -597,7 +613,23 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       textBlocks.push(createTextBlock("telegram", `Telegram: ${employee.contact.telegram}`, 20, 260, 16));
     }
 
-    setBlocks([bgBlock, ...textBlocks]);
+    // Добавляем логотип, если он есть в branding
+    const allBlocks = [bgBlock, ...textBlocks];
+    if (employee.branding && employee.branding.logo_url) {
+      const logoBlock = {
+        id: "logo",
+        type: "image",
+        imageSrc: employee.branding.logo_url,
+        x: 1020, // Справа (1280 - 240 = 1040, минус 20 отступ)
+        y: 20,   // Сверху
+        width: 240,
+        height: 150,
+        objectFit: "contain"
+      };
+      allBlocks.push(logoBlock);
+    }
+
+    setBlocks(allBlocks);
   }, [bgBlockData, blocks, setBlocks]);
 
   const handleUpdate = (id, newProps) => {
@@ -675,22 +707,44 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
           backgroundSize: "cover",
           backgroundPosition: "center",
-          filter: BACKGROUND_BLUR > 0 ? `blur(${BACKGROUND_BLUR}px)` : 'none',
+          filter: backgroundBlur > 0 ? `blur(${backgroundBlur}px)` : 'none',
           zIndex: 0
         }}
       />
 
-      {/* Слой 2: Текстовые блоки */}
-      {blocks.map((b) => (
-        <DraggableText
-          key={b.id}
-          block={b}
-          selected={b.id === selectedBlockId}
-          onSelect={handleTextSelect}
-          onUpdate={handleUpdate}
-          parentRef={containerRef}
-        />
-      ))}
+      {/* Слой 2: Текстовые блоки и изображения */}
+      {blocks.map((b) => {
+        // Пропускаем блок метаданных (b1)
+        if (b.type === 'metadata' || b.id === 'b1') {
+          return null;
+        }
+        
+        // Рендерим изображение или текст в зависимости от типа блока
+        if (b.type === 'image') {
+          return (
+            <DraggableImage
+              key={b.id}
+              block={b}
+              selected={b.id === selectedBlockId}
+              onSelect={handleTextSelect}
+              onUpdate={handleUpdate}
+              parentRef={containerRef}
+            />
+          );
+        }
+        
+        // По умолчанию рендерим как текст
+        return (
+          <DraggableText
+            key={b.id}
+            block={b}
+            selected={b.id === selectedBlockId}
+            onSelect={handleTextSelect}
+            onUpdate={handleUpdate}
+            parentRef={containerRef}
+          />
+        );
+      })}
 
       {/* Слой 3: Canvas с веб-камерой (прозрачный фон) */}
       <canvas
@@ -707,20 +761,25 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       />
 
       {/* Overlay и панель редактирования */}
-      {selectedBlockId && blocks.find(b => b.id === selectedBlockId) && (
-        <>
-          <div 
-            className="text-editor-overlay" 
-            onClick={() => setSelectedBlockId(null)}
-          />
-          <TextEditorPanel
-            key={selectedBlockId}
-            block={blocks.find(b => b.id === selectedBlockId)}
-            onUpdate={handleUpdate}
-            onClose={handleEditorClose}
-          />
-        </>
-      )}
+      {selectedBlockId && blocks.find(b => b.id === selectedBlockId) && (() => {
+        const selectedBlock = blocks.find(b => b.id === selectedBlockId);
+        const EditorPanel = selectedBlock.type === 'image' ? ImageEditorPanel : TextEditorPanel;
+        
+        return (
+          <>
+            <div 
+              className="text-editor-overlay" 
+              onClick={() => setSelectedBlockId(null)}
+            />
+            <EditorPanel
+              key={selectedBlockId}
+              block={selectedBlock}
+              onUpdate={handleUpdate}
+              onClose={handleEditorClose}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }
