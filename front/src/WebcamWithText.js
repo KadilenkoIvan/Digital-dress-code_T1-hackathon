@@ -6,7 +6,7 @@ import TextEditorPanel from "./TextEditorPanel";
 import ImageEditorPanel from "./ImageEditorPanel";
 import "./TextEditorPanel.css";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8, rawMode = false, numThreads = 2 }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8, rawMode = false, numThreads = 1 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -263,9 +263,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       const savedValue = parseInt(savedThreads);
       // Валидация сохранённого значения
       if (savedValue > maxThreads || savedValue < 1) {
-        console.warn(`⚠️ Invalid saved threads ${savedValue}, using default: 2`);
-        localStorage.setItem('onnx_num_threads', '2');
-        threadsToUse = 2;
+        console.warn(`⚠️ Invalid saved threads ${savedValue}, using default: 1`);
+        localStorage.setItem('onnx_num_threads', '1');
+        threadsToUse = 1;
       } else {
         threadsToUse = savedValue;
       }

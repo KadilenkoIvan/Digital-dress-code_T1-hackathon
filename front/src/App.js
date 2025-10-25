@@ -18,13 +18,13 @@ function App() {
       const savedValue = parseInt(saved);
       // Валидация: не больше максимума и не меньше 1
       if (savedValue > maxThreads || savedValue < 1) {
-        localStorage.setItem('onnx_num_threads', '2');
-        return 2;
+        localStorage.setItem('onnx_num_threads', '1');
+        return 1;
       }
       return savedValue;
     }
-    return 2;
-  }); // Количество потоков (по умолчанию 2)
+    return 1;
+  }); // Количество потоков (по умолчанию 1)
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
