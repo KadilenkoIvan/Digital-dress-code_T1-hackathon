@@ -13,7 +13,7 @@ npm start
 (*Примечание: для запуска npm install может понадобиться VPN*)
 
 ## Интерфейс
-![image](images\demonstration.png)
+![image](images/demonstration.png)
 
 ### Удаление фона и обработка изображения
 - Моделью для сегментации была выбрана [RVM](https://github.com/PeterL1n/RobustVideoMatting?tab=readme-ov-file)  
