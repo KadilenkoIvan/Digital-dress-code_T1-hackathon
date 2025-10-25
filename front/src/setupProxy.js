@@ -17,12 +17,6 @@ module.exports = function(app) {
     
     // Log headers (only once on startup)
     if (!global.headersLogged) {
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('✅ setupProxy.js loaded!');
-      console.log('✅ HTTP Headers configured for SharedArrayBuffer:');
-      console.log('   - Cross-Origin-Embedder-Policy: require-corp');
-      console.log('   - Cross-Origin-Opener-Policy: same-origin');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       global.headersLogged = true;
     }
     
