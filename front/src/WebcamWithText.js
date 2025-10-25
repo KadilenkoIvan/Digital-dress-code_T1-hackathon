@@ -251,18 +251,34 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       })
       .catch(console.error);
 
-    // Настройка ONNX Runtime - ПРОСТАЯ СТАБИЛЬНАЯ ВЕРСИЯ
-    ort.env.wasm.numThreads = 1;
+    // Настройка ONNX Runtime - МНОГОПОТОЧНЫЙ WASM с проверкой
+    const cpuCores = Math.min(navigator.hardwareConcurrency || 4, 4); // Максимум 4 ядра
+    const canUseMultiThread = window.crossOriginIsolated === true;
+    
+    console.log(`💻 CPU cores available: ${navigator.hardwareConcurrency || 4}, using: ${cpuCores}`);
+    console.log(`🔗 Multi-threading available: ${canUseMultiThread ? 'YES' : 'NO (missing HTTP headers)'}`);
+    
+    if (canUseMultiThread) {
+      console.log(`🚀 Enabling ${cpuCores} threads`);
+      ort.env.wasm.numThreads = cpuCores;
+    } else {
+      console.log(`⚠️ Using 1 thread (restart dev server to enable multi-threading)`);
+      ort.env.wasm.numThreads = 1;
+    }
+    
     ort.env.wasm.simd = true;
     
-    // Загрузка модели - только WASM для стабильности
-    console.log("🔄 Loading model with WASM...");
+    const backendName = canUseMultiThread ? `WASM (${cpuCores} threads)` : 'WASM (1 thread)';
+    console.log(`🔄 Loading model with ${backendName}...`);
+    
     ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
+      enableCpuMemArena: true,
+      enableMemPattern: true,
     }).then((sess) => {
-      console.log("✅ Model loaded!");
-      backendNameRef.current = 'WASM (CPU)';
+      console.log(`✅ Model loaded!`);
+      backendNameRef.current = backendName;
       
       if (onStatsUpdate) {
         onStatsUpdate({
@@ -271,7 +287,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           modelTime: null,
           fullFrameTime: null,
           modelActive: false,
-          backend: 'WASM (CPU)'
+          backend: backendName
         });
       }
       
