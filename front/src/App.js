@@ -12,8 +12,19 @@ function App() {
   const [numThreads, setNumThreads] = useState(() => {
     // Восстанавливаем значение из localStorage после перезагрузки
     const saved = localStorage.getItem('onnx_num_threads');
-    return saved ? parseInt(saved) : 1;
-  }); // Количество потоков
+    const maxThreads = Math.min(navigator.hardwareConcurrency || 4, 6);
+    
+    if (saved) {
+      const savedValue = parseInt(saved);
+      // Валидация: не больше максимума и не меньше 1
+      if (savedValue > maxThreads || savedValue < 1) {
+        localStorage.setItem('onnx_num_threads', '2');
+        return 2;
+      }
+      return savedValue;
+    }
+    return 2;
+  }); // Количество потоков (по умолчанию 2)
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
@@ -267,7 +278,7 @@ function App() {
             <input 
               type="range" 
               min="1" 
-              max={navigator.hardwareConcurrency || 4} 
+              max={Math.min(navigator.hardwareConcurrency || 4, 6)} 
               step="1"
               value={numThreads} 
               onChange={(e) => setNumThreads(parseInt(e.target.value))}
