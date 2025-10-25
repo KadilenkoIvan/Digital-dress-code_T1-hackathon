@@ -6,16 +6,21 @@ function App() {
   const [blocks, setBlocks] = useState([]);
   const [selectedBlockId, setSelectedBlockId] = useState(null);
   const [backgroundBlur, setBackgroundBlur] = useState(10); // Размытие фона (0-50)
-  const [modelScale, setModelScale] = useState(0.2); // Масштаб модели (0.0-1.0)
-  const [downsampleRatio, setDownsampleRatio] = useState(0.8); // Downsample ratio (0.5-0.9)
+  const [modelScale, setModelScale] = useState(0.3); // Масштаб модели (0.0-1.0)
+  const [downsampleRatio, setDownsampleRatio] = useState(0.9); // Downsample ratio (0.5-0.9)
   const [rawMode, setRawMode] = useState(false); // Режим вывода: false = обработанное, true = сырое видео
+  const [numThreads, setNumThreads] = useState(() => {
+    // Восстанавливаем значение из localStorage после перезагрузки
+    const saved = localStorage.getItem('onnx_num_threads');
+    return saved ? parseInt(saved) : 1;
+  }); // Количество потоков
   const [stats, setStats] = useState({
     fps: null,
     avgFps: null,
     modelTime: null,
     fullFrameTime: null,
     modelActive: false,
-    backend: 'Loading...'
+    device: 'Loading...'
   });
   
   // Refs для сброса file inputs
@@ -183,8 +188,8 @@ function App() {
           </span>
         </div>
         <div className="stat-item">
-          <span className="stat-label">Backend:</span>
-          <span className="stat-value">{stats.backend}</span>
+          <span className="stat-label">Device:</span>
+          <span className="stat-value">{stats.device}</span>
         </div>
       </div>
 
@@ -200,6 +205,7 @@ function App() {
           modelScale={modelScale}
           downsampleRatio={downsampleRatio}
           rawMode={rawMode}
+          numThreads={numThreads}
         />
       </div>
 
@@ -253,6 +259,22 @@ function App() {
               className="downsample-slider"
             />
             <span className="slider-hint">Меньше = быстрее, больше = лучше качество краёв</span>
+          </label>
+        </div>
+        <div className="setting-group">
+          <label>
+            Количество потоков CPU: {numThreads}
+            <input 
+              type="range" 
+              min="1" 
+              max={navigator.hardwareConcurrency || 4} 
+              step="1"
+              value={numThreads} 
+              onChange={(e) => setNumThreads(parseInt(e.target.value))}
+              className="threads-slider"
+            />
+            <span className="slider-hint">Сколько потоков процессора использовать</span>
+            <span className="slider-hint">(Внимание! Перезагружает страницу при изменении)</span>
           </label>
         </div>
         <div className="setting-group">

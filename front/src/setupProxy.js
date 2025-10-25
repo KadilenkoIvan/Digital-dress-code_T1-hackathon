@@ -9,16 +9,20 @@
  */
 
 module.exports = function(app) {
-  app.use((req, res, next) => {
+  // Применяем заголовки ДО любых других middleware
+  app.use(function(req, res, next) {
     // Enable SharedArrayBuffer for multi-threading
     res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     
     // Log headers (only once on startup)
     if (!global.headersLogged) {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('✅ setupProxy.js loaded!');
       console.log('✅ HTTP Headers configured for SharedArrayBuffer:');
       console.log('   - Cross-Origin-Embedder-Policy: require-corp');
       console.log('   - Cross-Origin-Opener-Policy: same-origin');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       global.headersLogged = true;
     }
     

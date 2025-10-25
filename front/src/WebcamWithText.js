@@ -6,7 +6,7 @@ import TextEditorPanel from "./TextEditorPanel";
 import ImageEditorPanel from "./ImageEditorPanel";
 import "./TextEditorPanel.css";
 
-export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8, rawMode = false }) {
+export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, setSelectedBlockId, onStatsUpdate, backgroundImage, backgroundBlur = 0, modelScale = 0.4, downsampleRatio = 0.8, rawMode = false, numThreads = 1 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -19,7 +19,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const downsampleCanvasRef = useRef(null); // Canvas для уменьшенного изображения
   const maskCanvasRef = useRef(null); // Canvas для маски уменьшенного размера
   const fullMaskCanvasRef = useRef(null); // Canvas для маски полного размера
-  const backendNameRef = useRef('Loading...'); // Название используемого backend
+  const deviceNameRef = useRef('Loading...'); // Название используемого device
   const prevMaskRef = useRef(null); // Предыдущая маска для temporal smoothing
   const lastEmployeeRef = useRef(null); // Последний обработанный employee для предотвращения дублирования
   const textClickedRef = useRef(false); // Флаг для отслеживания кликов по тексту
@@ -252,24 +252,21 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       .catch(console.error);
 
     // Настройка ONNX Runtime - МНОГОПОТОЧНЫЙ WASM с проверкой
-    const cpuCores = Math.min(navigator.hardwareConcurrency || 4, 4); // Максимум 4 ядра
     const canUseMultiThread = window.crossOriginIsolated === true;
     
-    console.log(`💻 CPU cores available: ${navigator.hardwareConcurrency || 4}, using: ${cpuCores}`);
+    // Проверяем сохранённое значение из localStorage (после перезагрузки)
+    const savedThreads = localStorage.getItem('onnx_num_threads');
+    const threadsToUse = canUseMultiThread ? (savedThreads ? parseInt(savedThreads) : numThreads) : 1;
+    
+    console.log(`💻 CPU cores available: ${navigator.hardwareConcurrency || 4}, requested: ${numThreads}, using: ${threadsToUse}`);
     console.log(`🔗 Multi-threading available: ${canUseMultiThread ? 'YES' : 'NO (missing HTTP headers)'}`);
+    console.log(`🚀 Initializing with ${threadsToUse} thread(s)`);
     
-    if (canUseMultiThread) {
-      console.log(`🚀 Enabling ${cpuCores} threads`);
-      ort.env.wasm.numThreads = cpuCores;
-    } else {
-      console.log(`⚠️ Using 1 thread (restart dev server to enable multi-threading)`);
-      ort.env.wasm.numThreads = 1;
-    }
-    
+    ort.env.wasm.numThreads = threadsToUse;
     ort.env.wasm.simd = true;
     
-    const backendName = canUseMultiThread ? `WASM (${cpuCores} threads)` : 'WASM (1 thread)';
-    console.log(`🔄 Loading model with ${backendName}...`);
+    const deviceName = canUseMultiThread ? `WASM (${threadsToUse} threads)` : 'WASM (1 thread)';
+    console.log(`🔄 Loading model with ${deviceName}...`);
     
     ort.InferenceSession.create("/rvm_mobilenetv3_fp32.onnx", {
       executionProviders: ['wasm'],
@@ -278,7 +275,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       enableMemPattern: true,
     }).then((sess) => {
       console.log(`✅ Model loaded!`);
-      backendNameRef.current = backendName;
+      deviceNameRef.current = deviceName;
       
       if (onStatsUpdate) {
         onStatsUpdate({
@@ -287,7 +284,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           modelTime: null,
           fullFrameTime: null,
           modelActive: false,
-          backend: backendName
+          device: deviceName
         });
       }
       
@@ -431,7 +428,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               modelTime: null,
               fullFrameTime: null,
               modelActive: false,
-              backend: 'RAW MODE'
+              device: 'RAW MODE'
             });
           }
           
@@ -676,7 +673,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
                 modelTime: modelInferenceTime.toFixed(2), // Время только модели
                 fullFrameTime: frameTime.toFixed(2), // Полное время обработки кадра
                 modelActive: true,
-                backend: backendNameRef.current
+                device: deviceNameRef.current
               });
             }
           } catch (error) {
@@ -691,7 +688,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
                 modelTime: null,
                 fullFrameTime: null,
                 modelActive: false,
-                backend: backendNameRef.current
+                device: deviceNameRef.current
               });
             }
           }
@@ -706,7 +703,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               modelTime: null,
               fullFrameTime: null,
               modelActive: false,
-              backend: backendNameRef.current
+              device: deviceNameRef.current
             });
           }
         }
@@ -722,8 +719,44 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
         cancelAnimationFrame(animationId);
       }
     };
-  }, [session, modelScale, downsampleRatio, rawMode, backgroundImage, backgroundBlur]);
+  }, [session, modelScale, downsampleRatio, rawMode, backgroundImage, backgroundBlur, numThreads]);
 
+  // Перезагрузка модели при изменении numThreads
+  useEffect(() => {
+    if (!session) return; // Модель ещё не загружена
+    
+    console.log(`🔄 numThreads changed to ${numThreads}, forcing full reload...`);
+    
+    const canUseMultiThread = window.crossOriginIsolated === true;
+    const threadsToUse = canUseMultiThread ? numThreads : 1;
+    
+    if (!canUseMultiThread && numThreads > 1) {
+      console.warn(`⚠️ Multi-threading unavailable! Restart dev server to enable. Using 1 thread.`);
+    }
+    
+    // Закрываем старую сессию
+    if (session) {
+      session.release?.().catch(console.error);
+    }
+    setSession(null);
+    
+    // КРИТИЧНО: Нужно полностью перезагрузить страницу для смены количества потоков
+    // WASM модуль компилируется один раз и не может быть изменён динамически
+    console.warn('⚠️ ONNX Runtime cannot dynamically change thread count.');
+    console.warn('💡 Please RELOAD THE PAGE (F5) to apply new thread count.');
+    console.warn(`🔄 Page will reload in 1 second to apply ${threadsToUse} threads...`);
+    
+    // Сохраняем новое значение потоков в localStorage
+    localStorage.setItem('onnx_num_threads', threadsToUse.toString());
+    
+    // Перезагружаем страницу через 1 секунду
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numThreads]);
+  
   // Сброс рекуррентных состояний при изменении modelScale или downsampleRatio
   useEffect(() => {
     if (recRef.current.length > 0) {
@@ -754,7 +787,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           modelTime: null,
           fullFrameTime: null,
           modelActive: false,
-          backend: 'RAW MODE'
+          device: 'RAW MODE'
         });
       } else {
         onStatsUpdate({
@@ -763,12 +796,12 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           modelTime: null,
           fullFrameTime: null,
           modelActive: false,
-          backend: backendNameRef.current
+          device: deviceNameRef.current
         });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawMode, modelScale, downsampleRatio]);
+  }, [rawMode, modelScale, downsampleRatio, numThreads]);
 
   // Мемоизируем блок "b1" и его ключевые свойства для оптимизации
   const bgBlockData = useMemo(() => {
