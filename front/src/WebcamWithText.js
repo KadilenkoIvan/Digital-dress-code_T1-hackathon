@@ -27,6 +27,11 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const blurredBgCanvasRef = useRef(null); // Canvas для размытого реального фона
   const frameSkipCounter = useRef(0); // Счетчик кадров для пропуска (обрабатываем каждый второй)
   const cachedMaskRef = useRef(null); // Кэшированная маска для пропущенного кадра
+  const skipFramesCount = useRef(1); // Сколько кадров пропускать (1 = обрабатываем каждый второй)
+  const lastModelTimeRef = useRef(0); // Последнее время модели для отображения на пропущенных кадрах
+  
+  // Параметр пропуска кадров - можно управлять через UI
+  const FRAMES_TO_SKIP = 1; // 1 = каждый второй, 2 = каждый третий, 0 = все обрабатывать
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
@@ -477,9 +482,9 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
           // downsample_ratio - параметр внутренней оптимизации модели
           const downsampleRatioTensor = new ort.Tensor("float32", new Float32Array([downsampleRatio]), [1]);
 
-          // Пропуск кадров: обрабатываем каждый второй кадр
-          frameSkipCounter.current = (frameSkipCounter.current + 1) % 2;
-          const shouldRunModel = frameSkipCounter.current === 1;
+          // Пропуск кадров: обрабатываем каждый (FRAMES_TO_SKIP+1) кадр
+          frameSkipCounter.current = (frameSkipCounter.current + 1) % (FRAMES_TO_SKIP + 1);
+          const shouldRunModel = FRAMES_TO_SKIP === 0 ? true : frameSkipCounter.current === FRAMES_TO_SKIP;
 
           try {
             
@@ -508,14 +513,19 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               // Сохраняем маску для следующего кадра
               cachedMaskRef.current = new Float32Array(phaSmall);
               
+              // Сохраняем время модели для отображения на пропущенных кадрах
+              lastModelTimeRef.current = modelInferenceTime;
+              
               // Обновление rec states
               if (results.r1o) recRef.current[0] = results.r1o;
               if (results.r2o) recRef.current[1] = results.r2o;
               if (results.r3o) recRef.current[2] = results.r3o;
               if (results.r4o) recRef.current[3] = results.r4o;
             } else {
-              // Используем кэшированную маску из предыдущего кадра
+              // Используем кэшированную маску и последнее время модели
               phaSmall = cachedMaskRef.current;
+              modelInferenceTime = lastModelTimeRef.current;
+              
               if (!phaSmall) {
                 // Если кэша нет (первый пропущенный кадр), используем текущий кадр
                 const feeds = {
@@ -526,11 +536,17 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
                   r4i: recRef.current[3],
                   downsample_ratio: downsampleRatioTensor
                 };
+                
+                // Измеряем время для первого кадра
+                const modelStartTime = performance.now();
                 const results = await session.run(feeds);
+                modelInferenceTime = performance.now() - modelStartTime;
+                lastModelTimeRef.current = modelInferenceTime;
+                
                 phaSmall = results.pha.data;
                 cachedMaskRef.current = new Float32Array(phaSmall);
                 
-                // Обновление rec states (не применяем на пропущенных кадрах)
+                // Обновление rec states
                 if (results.r1o) recRef.current[0] = results.r1o;
                 if (results.r2o) recRef.current[1] = results.r2o;
                 if (results.r3o) recRef.current[2] = results.r3o;
@@ -554,6 +570,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             const maskImageData = maskCtx.createImageData(modelWidth, modelHeight);
             
             // 1. Temporal Smoothing (EMA) - сглаживание между кадрами
+            // ЗАКОМЕНТИРОВАНО для ускорения
+            /*
             const prevMask = prevMaskRef.current;
             let smoothingCoeff = TEMPORAL_SMOOTHING;
             
@@ -575,6 +593,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
             }
             // Сохраняем текущую маску для следующего кадра
             prevMaskRef.current = new Float32Array(phaSmall);
+            */
             
             // 2. Заполняем уменьшенную маску (grayscale)
             for (let i = 0; i < modelWidth * modelHeight; i++) {
@@ -702,8 +721,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               onStatsUpdate({
                 fps: fps.toFixed(2),
                 avgFps: avgFps.toFixed(2),
-                modelTime: shouldRunModel ? modelInferenceTime.toFixed(2) : '0.00 (cached)', // Время только модели
-                fullFrameTime: frameTime.toFixed(2), // Полное время обработки кадра
+                modelTime: modelInferenceTime.toFixed(2), // Время только модели (показываем время последнего вызова)
+                fullFrameTime: `${frameTime.toFixed(2)} (skip: ${FRAMES_TO_SKIP})`, // Полное время обработки кадра + параметр пропуска
                 modelActive: true,
                 device: deviceNameRef.current
               });
