@@ -25,6 +25,8 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
   const textClickedRef = useRef(false); // Флаг для отслеживания кликов по тексту
   const backgroundLayerRef = useRef(null); // Ref для фонового слоя
   const blurredBgCanvasRef = useRef(null); // Canvas для размытого реального фона
+  const frameSkipCounter = useRef(0); // Счетчик кадров для пропуска (обрабатываем каждый второй)
+  const cachedMaskRef = useRef(null); // Кэшированная маска для пропущенного кадра
   
   // Коэффициент уменьшения для модели (0.4 = 40% от оригинала)
   // Меньше значение = быстрее работа, но ниже качество
@@ -138,27 +140,6 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
       totalDiff += Math.abs(mask1[i] - mask2[i]);
     }
     return totalDiff / mask1.length;
-  };
-  
-  // Функция для анализа качества освещенности изображения
-  const analyzeLightingQuality = (imageData) => {
-    const data = imageData.data;
-    let totalBrightness = 0;
-    let pixelCount = 0;
-    
-    // Вычисляем среднюю яркость (используем luminance формулу)
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      // Формула luminance: 0.299*R + 0.587*G + 0.114*B
-      const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-      totalBrightness += brightness;
-      pixelCount++;
-    }
-    
-    const averageBrightness = totalBrightness / pixelCount / 255.0; // Нормализуем к [0, 1]
-    return averageBrightness;
   };
   
   // Функция bilateral blur (сохраняет края, размывает шум)
@@ -493,33 +474,69 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
 
           // Передаём уменьшенное изображение в модель
           const inputTensor = new ort.Tensor("float32", rgbData, [1, 3, modelHeight, modelWidth]);
-          // downsample_ratio - параметр внутренней оптимизации модели (0.8 = хороший баланс)
+          // downsample_ratio - параметр внутренней оптимизации модели
           const downsampleRatioTensor = new ort.Tensor("float32", new Float32Array([downsampleRatio]), [1]);
 
-          try {
-            // Запуск модели
-            const feeds = {
-              src: inputTensor,
-              r1i: recRef.current[0],
-              r2i: recRef.current[1],
-              r3i: recRef.current[2],
-              r4i: recRef.current[3],
-              downsample_ratio: downsampleRatioTensor
-            };
+          // Пропуск кадров: обрабатываем каждый второй кадр
+          frameSkipCounter.current = (frameSkipCounter.current + 1) % 2;
+          const shouldRunModel = frameSkipCounter.current === 1;
 
-            // Измерение времени только для модели
-            const modelStartTime = performance.now();
-            const results = await session.run(feeds);
-            const modelInferenceTime = performance.now() - modelStartTime;
+          try {
             
-            // Извлечение результатов (они в уменьшенном размере)
-            const phaSmall = results.pha.data;  // Маска уменьшенного размера
+            let phaSmall;
+            let modelInferenceTime = 0;
             
-            // Обновление rec states
-            if (results.r1o) recRef.current[0] = results.r1o;
-            if (results.r2o) recRef.current[1] = results.r2o;
-            if (results.r3o) recRef.current[2] = results.r3o;
-            if (results.r4o) recRef.current[3] = results.r4o;
+            if (shouldRunModel) {
+              // Запуск модели
+              const feeds = {
+                src: inputTensor,
+                r1i: recRef.current[0],
+                r2i: recRef.current[1],
+                r3i: recRef.current[2],
+                r4i: recRef.current[3],
+                downsample_ratio: downsampleRatioTensor
+              };
+
+              // Измерение времени только для модели
+              const modelStartTime = performance.now();
+              const results = await session.run(feeds);
+              modelInferenceTime = performance.now() - modelStartTime;
+              
+              // Извлечение результатов (они в уменьшенном размере)
+              phaSmall = results.pha.data;  // Маска уменьшенного размера
+              
+              // Сохраняем маску для следующего кадра
+              cachedMaskRef.current = new Float32Array(phaSmall);
+              
+              // Обновление rec states
+              if (results.r1o) recRef.current[0] = results.r1o;
+              if (results.r2o) recRef.current[1] = results.r2o;
+              if (results.r3o) recRef.current[2] = results.r3o;
+              if (results.r4o) recRef.current[3] = results.r4o;
+            } else {
+              // Используем кэшированную маску из предыдущего кадра
+              phaSmall = cachedMaskRef.current;
+              if (!phaSmall) {
+                // Если кэша нет (первый пропущенный кадр), используем текущий кадр
+                const feeds = {
+                  src: inputTensor,
+                  r1i: recRef.current[0],
+                  r2i: recRef.current[1],
+                  r3i: recRef.current[2],
+                  r4i: recRef.current[3],
+                  downsample_ratio: downsampleRatioTensor
+                };
+                const results = await session.run(feeds);
+                phaSmall = results.pha.data;
+                cachedMaskRef.current = new Float32Array(phaSmall);
+                
+                // Обновление rec states (не применяем на пропущенных кадрах)
+                if (results.r1o) recRef.current[0] = results.r1o;
+                if (results.r2o) recRef.current[1] = results.r2o;
+                if (results.r3o) recRef.current[2] = results.r3o;
+                if (results.r4o) recRef.current[3] = results.r4o;
+              }
+            }
 
             // Очищаем canvas (делаем полностью прозрачным)
             ctx.clearRect(0, 0, origWidth, origHeight);
@@ -685,7 +702,7 @@ export default function WebcamWithText({ blocks, setBlocks, selectedBlockId, set
               onStatsUpdate({
                 fps: fps.toFixed(2),
                 avgFps: avgFps.toFixed(2),
-                modelTime: modelInferenceTime.toFixed(2), // Время только модели
+                modelTime: shouldRunModel ? modelInferenceTime.toFixed(2) : '0.00 (cached)', // Время только модели
                 fullFrameTime: frameTime.toFixed(2), // Полное время обработки кадра
                 modelActive: true,
                 device: deviceNameRef.current
